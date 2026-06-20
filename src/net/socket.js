@@ -4,9 +4,10 @@ import { config } from '../config.js';
 import { log } from '../logger.js';
 
 export class GameSocket extends EventEmitter {
-  constructor({ accessToken, displayName, persistentPlayerId }) {
+  constructor({ accessToken, walletSessionToken, displayName, persistentPlayerId }) {
     super();
     this.accessToken = accessToken;
+    this.walletSessionToken = walletSessionToken;
     this.displayName = displayName;
     this.persistentPlayerId = persistentPlayerId;
     this.ready = false;
@@ -20,8 +21,11 @@ export class GameSocket extends EventEmitter {
       reconnectionDelay: 1500,
       reconnectionDelayMax: 15000,
       randomizationFactor: 0.5,
-      extraHeaders: { Authorization: `Bearer ${this.accessToken}` },
-      auth: { token: this.accessToken },
+      auth: {
+        accessToken: this.accessToken,
+        walletSessionToken: this.walletSessionToken,
+        displayName: this.displayName,
+      },
     });
 
     this.socket.on('connect', () => {

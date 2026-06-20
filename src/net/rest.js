@@ -4,13 +4,15 @@ import { log } from '../logger.js';
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
 export class Rest {
-  constructor({ origin = config.apiOrigin } = {}) { this.origin = origin; this.cookie = ''; this.bearer = ''; }
+  constructor({ origin = config.apiOrigin } = {}) { this.origin = origin; this.cookie = ''; this.bearer = ''; this.walletSession = ''; }
   setCookie(c){ this.cookie = c; }
   setBearer(b){ this.bearer = b; }
+  setWalletSession(t){ this.walletSession = t; }
   headers(extra = {}) {
     const h = { 'Content-Type': 'application/json', Origin: config.apiOrigin, 'User-Agent': UA, ...extra };
     if (this.cookie) h.Cookie = this.cookie;
     if (this.bearer) h.Authorization = `Bearer ${this.bearer}`;
+    if (this.walletSession) h['x-farmtown-wallet-session'] = this.walletSession;
     return h;
   }
   async req(path, { method = 'GET', body, base, retries = 2, apikey } = {}) {

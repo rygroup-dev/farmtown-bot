@@ -16,3 +16,11 @@ export async function bindWallet(rest) {
   if (vr.status !== 200 || !vr.json?.gameplayAllowed) throw new Error('verify failed: ' + JSON.stringify(vr.json).slice(0, 200));
   return vr.json;
 }
+
+// The walletSessionToken is a base64url JWT-like token whose payload carries the game playerId.
+export function walletSessionPlayerId(token) {
+  try {
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(Buffer.from(b64, 'base64').toString('utf8')).playerId || null;
+  } catch { return null; }
+}
