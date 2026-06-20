@@ -1,0 +1,17 @@
+[Unit]
+Description=FarmTown Sentinel Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/farmtown-bot
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+StandardOutput=append:/root/farmtown-bot/data/service.log
+StandardError=append:/root/farmtown-bot/data/service.log
+
+[Install]
+WantedBy=multi-user.target
