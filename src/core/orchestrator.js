@@ -61,6 +61,12 @@ export async function runAccount() {
       if (ev === 'game:error' || ev === 'farm:error') log.warn('GAMEERR', (data.code || '?') + ' ' + (data.message || ''));
       if (ev === 'player:farmState/sync') { const now = Date.now(); if (now - lastStateLog >= 30000) { lastStateLog = now; log.info('STATE', 'gold=' + state.gold + ' level=' + state.level + ' stars=' + state.stars); } }
     });
+    let lastQueueLog = 0, queuedNotified = false;
+    gs.on('queue', (d) => {
+      const now = Date.now();
+      if (now - lastQueueLog >= 15000) { lastQueueLog = now; log.info('QUEUE', `position ${d.position} (online ${d.online}/${d.capacity})`); }
+      if (!queuedNotified) { queuedNotified = true; tg.notify(`⏳ in queue — position ${d.position}, joining automatically`); }
+    });
     gs.on('joined', () => { flags.connected = true; reconnecting = false; log.info('JOINED', 'farm gold=' + state.gold + ' level=' + state.level); tg.notify('🟢 joined farm — level ' + state.level + ' gold ' + state.gold); });
     gs.on('down', (reason) => { flags.connected = false; scheduleReconnect(reason); });
   }
