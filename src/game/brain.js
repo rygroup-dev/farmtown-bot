@@ -1,6 +1,6 @@
 import { rankCrops } from './economy.js';
 
-export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick = 12, goldReserve = 150 } = {}) {
+export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick = 12, goldReserve = 150, timeBudgetSeconds = Infinity } = {}) {
   const plan = [];
   for (const t of state.readyToHarvest())
     plan.push({ kind:'harvest', event:'crop:harvest/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'harvest', tool:'hoe' } });
@@ -10,9 +10,10 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
     plan.push({ kind:'hoe', event:'tile:hoe/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'hoe', tool:'hoe' } });
 
   const demand = state.cropDemand();
-  const ranked = rankCrops(eco, { gold: state.gold, level: state.level, objective });
-  const demanded = ranked.find(c => demand[c.id] > 0);
-  const best = demanded || ranked[0];
+  const candidates = rankCrops(eco, { gold: state.gold, level: state.level, objective })
+    .filter(c => c.growSeconds + (c.deathSeconds || 0) <= timeBudgetSeconds);
+  const demanded = candidates.find(c => demand[c.id] > 0);
+  const best = demanded || candidates[0];
 
   if (best) {
     let planted = 0;
@@ -36,6 +37,20 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
     plan.push({ kind:'buyPlot', event:'plot:buy/request', payload:{ tileX:t.x, tileY:t.y }, meta:null });
   }
   return plan;
+}
+
+const STORAGE_TIERS = [
+  { itemId: 'small_storage_crate', cap: 75, cost: 25000 },
+  { itemId: 'big_storage_crate', cap: 125, cost: 100000 },
+  { itemId: 'farm_storage_chest', cap: 200, cost: 500000 },
+];
+
+export function planStorage(state, { goldReserve = 5000 } = {}) {
+  const next = STORAGE_TIERS.find(t => t.cap > state.inventoryCapacity);
+  if (!next) return [];
+  if (state.gold - next.cost < goldReserve) return [];
+  if (state.seedCount() < state.inventoryCapacity - 5) return [];
+  return [{ kind: 'buyStorage', event: 'store:buyItem/request', payload: { itemId: next.itemId }, meta: null }];
 }
 
 export function planClaims(state) {

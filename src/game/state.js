@@ -1,7 +1,7 @@
 export class GameState {
   constructor() {
     this.gold = 0; this.xp = 0; this.level = 1; this.stars = 0;
-    this.inventory = {}; this.tiles = new Map();
+    this.inventory = {}; this.inventoryCapacity = 30; this.tiles = new Map();
     this.playerId = null; this.pos = { x: 784, y: 784 };
     this.cropInventory = {}; this.orders = []; this.farmJobs = [];
     this.starterTasks = { currentTaskId: null, completed: [] };
@@ -21,6 +21,7 @@ export class GameState {
         if (f.xp != null) this.xp = f.xp;
         if (f.level != null) this.level = f.level;
         if (f.premiumBalance?.stars != null) this.stars = f.premiumBalance.stars;
+        if (f.inventoryCapacity != null) this.inventoryCapacity = f.inventoryCapacity;
         if (f.inventory) this.inventory = { ...this.inventory, ...f.inventory };
         if (f.cropInventory) this.cropInventory = { ...this.cropInventory, ...f.cropInventory };
         if (f.orders) this.orders = f.orders;
@@ -53,6 +54,7 @@ export class GameState {
   claimableJobs() {
     return this.farmJobs.filter(j => (j.current || 0) >= (j.target || Infinity));
   }
+  seedCount() { return Object.values(this.inventory).reduce((a, b) => a + (b || 0), 0); }
   cropDemand() {
     const d = {};
     for (const o of this.orders) for (const [c, q] of Object.entries(o.requires || {})) d[c] = (d[c] || 0) + q;

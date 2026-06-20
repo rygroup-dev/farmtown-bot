@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { planActions, planClaims } from '../src/game/brain.js';
+import { planActions, planClaims, planStorage } from '../src/game/brain.js';
 import { GameState } from '../src/game/state.js';
 
 const eco = { potato: { id:'potato', seedId:'potato_seed', cost:3, sell:6, growSeconds:60, xp:1, unlockLevel:1 } };
@@ -69,4 +69,73 @@ test('planActions prefers demanded crop when available', () => {
   const plantAction = plan.find(a => a.kind === 'plant');
   assert.ok(plantAction, 'should have a plant action');
   assert.strictEqual(plantAction.payload.seedId, 'carrot_seed');
+});
+
+// --- timeBudgetSeconds tests ---
+
+test('planActions with timeBudgetSeconds excludes long crops', () => {
+  const ecoMixed = {
+    short: { id:'short', seedId:'short_seed', cost:1, sell:5, growSeconds:60, deathSeconds:30, xp:1, unlockLevel:1 },
+    long:  { id:'long',  seedId:'long_seed',  cost:1, sell:50, growSeconds:100000, deathSeconds:100, xp:10, unlockLevel:1 }
+  };
+  const s = new GameState();
+  s.gold = 100; s.inventory = {};
+  s.tiles.set('25,25', { x:25, y:25, ownerState:'owned', groundState:'tilled', blocker:'none', cropId:null });
+  const plan = planActions(s, ecoMixed, { timeBudgetSeconds: 1000 });
+  const plantAction = plan.find(a => a.kind === 'plant');
+  assert.ok(plantAction, 'should have a plant action');
+  assert.strictEqual(plantAction.payload.seedId, 'short_seed');
+});
+
+test('planActions with only long crop and tight timeBudget emits no plant', () => {
+  const ecoLong = {
+    long: { id:'long', seedId:'long_seed', cost:1, sell:50, growSeconds:100000, deathSeconds:100, xp:10, unlockLevel:1 }
+  };
+  const s = new GameState();
+  s.gold = 100; s.inventory = {};
+  s.tiles.set('25,25', { x:25, y:25, ownerState:'owned', groundState:'tilled', blocker:'none', cropId:null });
+  const plan = planActions(s, ecoLong, { timeBudgetSeconds: 1000 });
+  const plantAction = plan.find(a => a.kind === 'plant');
+  assert.strictEqual(plantAction, undefined, 'should not plant when no crop fits time budget');
+});
+
+// --- planStorage tests ---
+
+test('planStorage returns buy when near cap and rich enough', () => {
+  const s = new GameState();
+  s.inventoryCapacity = 30;
+  s.gold = 50000;
+  s.inventory = { potato_seed: 20, carrot_seed: 8 }; // sum = 28 >= 25
+  const plan = planStorage(s);
+  assert.strictEqual(plan.length, 1);
+  assert.strictEqual(plan[0].kind, 'buyStorage');
+  assert.strictEqual(plan[0].payload.itemId, 'small_storage_crate');
+});
+
+test('planStorage returns empty when too poor', () => {
+  const s = new GameState();
+  s.inventoryCapacity = 30;
+  s.gold = 1000;
+  s.inventory = { potato_seed: 20, carrot_seed: 8 };
+  const plan = planStorage(s);
+  assert.strictEqual(plan.length, 0);
+});
+
+test('planStorage returns empty when not near cap', () => {
+  const s = new GameState();
+  s.inventoryCapacity = 30;
+  s.gold = 50000;
+  s.inventory = { potato_seed: 5 }; // sum = 5, not near 25
+  const plan = planStorage(s);
+  assert.strictEqual(plan.length, 0);
+});
+
+test('planStorage picks next tier above current capacity', () => {
+  const s = new GameState();
+  s.inventoryCapacity = 75; // already has small_storage_crate
+  s.gold = 200000;
+  s.inventory = { potato_seed: 40, carrot_seed: 35 }; // sum = 75 >= 70
+  const plan = planStorage(s);
+  assert.strictEqual(plan.length, 1);
+  assert.strictEqual(plan[0].payload.itemId, 'big_storage_crate');
 });

@@ -53,3 +53,21 @@ test('starterTasks applied from farmState sync', () => {
   assert.strictEqual(s.starterTasks.currentTaskId, 'task3');
   assert.strictEqual(s.starterTasks.completed.length, 2);
 });
+
+test('inventoryCapacity defaults to 30 and syncs from farmState', () => {
+  const s = new GameState();
+  assert.strictEqual(s.inventoryCapacity, 30);
+  s.apply('player:farmState/sync', { farmState: { inventoryCapacity: 75 } });
+  assert.strictEqual(s.inventoryCapacity, 75);
+});
+
+test('seedCount sums all seed inventory values', () => {
+  const s = new GameState();
+  s.inventory = { potato_seed: 10, carrot_seed: 5, tomato_seed: 0 };
+  assert.strictEqual(s.seedCount(), 15);
+});
+
+test('seedCount returns 0 for empty inventory', () => {
+  const s = new GameState();
+  assert.strictEqual(s.seedCount(), 0);
+});
