@@ -1,0 +1,18 @@
+{
+  "name": "farmtown-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless automation for play.farmtown.online (socket.io + Solana wallet auth)",
+  "scripts": {
+    "recon": "node src/recon.js",
+    "bot": "node src/bot.js"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.3",
+    "bs58": "^6.0.0",
+    "dotenv": "^16.4.5",
+    "socket.io-client": "^4.7.5",
+    "tweetnacl": "^1.0.3"
+  }
+}

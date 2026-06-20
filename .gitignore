@@ -1,0 +1,23 @@
+# deps
+node_modules/
+
+# secrets & credentials — NEVER commit
+.env
+.env.*
+!.env.example
+cookie
+cookie.txt
+cookies.txt
+*.har
+session.json
+data/
+accounts*.json
+*.pem
+*.key
+*.keypair
+*secret*
+*credential*
+
+# captures / logs
+captures/
+*.log
