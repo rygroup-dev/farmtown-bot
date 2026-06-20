@@ -50,7 +50,7 @@ export async function runAccount() {
     saveSession(session);
   }
 
-  let gs, runner, lastStateLog = 0, reconnecting = false;
+  let gs, runner, lastStateLog = 0, reconnecting = false, lastActionAt = Date.now(), lastSnapshotAt = 0;
   function connect() {
     gs = new GameSocket({ accessToken: session.access_token, walletSessionToken: session.walletSessionToken, displayName: config.displayName, persistentPlayerId: session.persistentPlayerId }).connect();
     runner = new ActionRunner(gs);
@@ -59,7 +59,8 @@ export async function runAccount() {
       if (ev === 'player:farmState/sync' && !stats.goldStart) stats.goldStart = state.gold;
       if (ev === 'game:actionResult' && data.ok) log.info('ACT', (data.type || '?') + ' ok' + (data.message ? (' — ' + data.message) : ''));
       if (ev === 'game:error' || ev === 'farm:error') log.warn('GAMEERR', (data.code || '?') + ' ' + (data.message || ''));
-      if (ev === 'player:farmState/sync') { const now = Date.now(); if (now - lastStateLog >= 30000) { lastStateLog = now; log.info('STATE', 'gold=' + state.gold + ' level=' + state.level + ' stars=' + state.stars); } }
+      if (ev === 'game:actionResult' && data.ok) lastActionAt = Date.now();
+      if (ev === 'player:farmState/sync') { const now = Date.now(); if (now - lastStateLog >= 30000) { lastStateLog = now; log.info('STATE', `gold=${state.gold} lvl=${state.level} stars=${state.stars} | owned=${state.ownedTiles().length} grass=${state.grassEmpty().length} tilled=${state.tilledEmpty().length} ready=${state.readyToHarvest().length} orders=${state.completableOrders().length}/${state.orders.length} jobs=${state.claimableJobs().length}`); } }
     });
     let lastQueueLog = 0, queuedNotified = false;
     gs.on('queue', (d) => {
@@ -67,7 +68,7 @@ export async function runAccount() {
       if (now - lastQueueLog >= 15000) { lastQueueLog = now; log.info('QUEUE', `position ${d.position} (online ${d.online}/${d.capacity})`); }
       if (!queuedNotified) { queuedNotified = true; tg.notify(`⏳ in queue — position ${d.position}, joining automatically`); }
     });
-    gs.on('joined', () => { flags.connected = true; reconnecting = false; log.info('JOINED', 'farm gold=' + state.gold + ' level=' + state.level); tg.notify('🟢 joined farm — level ' + state.level + ' gold ' + state.gold); });
+    gs.on('joined', () => { flags.connected = true; reconnecting = false; reconnectAttempt = 0; lastActionAt = Date.now(); gs.refreshSnapshot(); log.info('JOINED', 'farm gold=' + state.gold + ' level=' + state.level + ' owned=' + state.ownedTiles().length); tg.notify('🟢 joined farm — level ' + state.level + ' gold ' + state.gold); });
     gs.on('down', (reason) => { flags.connected = false; scheduleReconnect(reason); });
   }
 
@@ -75,21 +76,29 @@ export async function runAccount() {
   async function scheduleReconnect(reason) {
     if (reconnecting || !flags.running) return;
     reconnecting = true;
+    flags.connected = false;
     try { gs?.close(); } catch {}
     const backoff = Math.min(2000 * 2 ** reconnectAttempt, 30000) + gaussianDelay(500, 2500);
     reconnectAttempt++;
     log.warn('WS', `down (${reason}) — reconnect in ${Math.round(backoff / 1000)}s (attempt ${reconnectAttempt})`);
     tg.notify('🔴 disconnected — reconnecting');
     await sleep(backoff);
-    if (!flags.running) return;
+    if (!flags.running) { reconnecting = false; return; }
     try {
       await reauth();
-      reconnectAttempt = 0;
       connect();
     } catch (e) {
-      log.error('RECONNECT', e.message);
+      log.error('RECONNECT', e.message + ' — retrying');
+    } finally {
+      // ALWAYS release the guard so the next 'down' can schedule another attempt.
+      // If reauth/connect failed, the freshly-created (or absent) socket's next
+      // 'down'/'connect_error' re-enters scheduleReconnect; if reauth threw before
+      // connect(), kick a delayed retry here.
       reconnecting = false;
-      scheduleReconnect('reauth-failed');
+    }
+    if (!flags.connected && flags.running && !gs?.socket?.connected) {
+      // no socket alive after this attempt → ensure another try is scheduled
+      setTimeout(() => scheduleReconnect('retry'), 5000);
     }
   }
   connect();
@@ -110,11 +119,24 @@ export async function runAccount() {
       if (flags.connected && !flags.paused && flags.autopilot && active) {
         while (manualQueue.length) { const m = manualQueue.shift(); await handleManual(m, { state, runner, flags }); }
         const plan = [...planClaims(state), ...planActions(state, eco, { objective: flags.forceCrop ? 'gold' : 'balanced' })];
-        for (const a of plan) {
-          if (!flags.running || flags.paused) break;
-          const ok = await runner.do(a.event, a.payload, a.meta);
-          if (a.kind === 'harvest' && ok) stats.harvests++;
-          if (a.kind === 'plant' && ok) stats.plants++;
+        if (plan.length) {
+          for (const a of plan) {
+            if (!flags.running || flags.paused) break;
+            const ok = await runner.do(a.event, a.payload, a.meta);
+            if (ok) lastActionAt = Date.now();
+            if (a.kind === 'harvest' && ok) stats.harvests++;
+            if (a.kind === 'plant' && ok) stats.plants++;
+          }
+        } else {
+          // Nothing to do. If idle for a while, re-request a fresh snapshot in case
+          // local tile state went stale (e.g. after a reconnect) — keeps the bot
+          // from silently sitting idle on a farm that actually has work.
+          const idleMs = Date.now() - lastActionAt;
+          if (idleMs > 90000 && Date.now() - lastSnapshotAt > 60000) {
+            lastSnapshotAt = Date.now();
+            log.info('TICK', `idle ${Math.round(idleMs / 1000)}s — refreshing snapshot (owned=${state.ownedTiles().length})`);
+            gs.refreshSnapshot();
+          }
         }
         if (maybeBreak(0.02)) { const b = gaussianDelay(8000, 30000); log.info('TICK', 'human break ' + b + 'ms'); await sleep(b); }
       }

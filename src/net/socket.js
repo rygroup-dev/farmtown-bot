@@ -82,6 +82,10 @@ export class GameSocket extends EventEmitter {
     this.socket.emit('farm:snapshot:request');
   }
 
+  refreshSnapshot() {
+    try { this.socket?.emit('farm:snapshot:request'); } catch {}
+  }
+
   startPing() {
     this.stopPing();
     this.pingTimer = setInterval(
