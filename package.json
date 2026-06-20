@@ -5,13 +5,19 @@
   "type": "module",
   "description": "Headless automation for play.farmtown.online (socket.io + Solana wallet auth)",
   "scripts": {
-    "recon": "node src/recon.js",
-    "bot": "node src/bot.js"
+    "bot": "node src/index.js",
+    "test": "node --test",
+    "extract-economy": "node scripts/extract-economy.js",
+    "auth-probe": "node scripts/auth-probe.js",
+    "verify-auth": "node scripts/verify-auth.js",
+    "verify-socket": "node scripts/verify-socket.js"
   },
   "dependencies": {
     "@solana/web3.js": "^1.95.3",
     "bs58": "^6.0.0",
     "dotenv": "^16.4.5",
+    "node-telegram-bot-api": "^0.66.0",
+    "playwright": "^1.48.0",
     "socket.io-client": "^4.7.5",
     "tweetnacl": "^1.0.3"
   }
