@@ -16,18 +16,20 @@ test('runs actions serially and waits for actionResult', async () => {
   const r = new ActionRunner(sock, { minGapMs: 0, maxGapMs: 0, walk: false });
   await r.do('tile:hoe/request', { tileX: 25, tileY: 23 }, { action: 'hoe', tool: 'hoe' });
   await r.do('tile:hoe/request', { tileX: 25, tileY: 24 }, { action: 'hoe', tool: 'hoe' });
-  assert.strictEqual(sock.sent.length, 2);
-  assert.match(sock.sent[0][1].actionId, /^hoe:/);
+  assert.strictEqual(sock.sent.length, 3); // 1 tool-select + 2 actions
+  assert.strictEqual(sock.sent[0][0], 'player:tool/select');
+  assert.match(sock.sent[1][1].actionId, /^hoe:/);
 });
 
 test('backpressure error triggers retry', async () => {
   const sock = new EventEmitter(); sock.sent = [];
   let first = true;
   sock.emitAction = (e, p) => { sock.sent.push([e, p]);
+    if (e === 'player:tool/select') return; // tool-select has no actionResult
     setTimeout(() => { if (first) { first = false; sock.emit('event', 'game:error', { actionId: p.actionId, code: 'ACTION_BACKPRESSURE' }); }
       else sock.emit('event', 'game:actionResult', { actionId: p.actionId, ok: true }); }, 5); };
   const r = new ActionRunner(sock, { minGapMs: 0, maxGapMs: 0, walk: false, backoffMs: 5 });
   const ok = await r.do('tile:hoe/request', { tileX: 1, tileY: 1 }, { action: 'hoe', tool: 'hoe' });
   assert.strictEqual(ok, true);
-  assert.strictEqual(sock.sent.length, 2);
+  assert.strictEqual(sock.sent.length, 3); // 1 tool-select + action + retry
 });

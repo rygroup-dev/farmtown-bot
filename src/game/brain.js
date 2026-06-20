@@ -8,8 +8,12 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
     plan.push({ kind:'clear', event:'tile:clear/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'clear', tool:'axe' } });
   for (const t of state.grassEmpty())
     plan.push({ kind:'hoe', event:'tile:hoe/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'hoe', tool:'hoe' } });
+
+  const demand = state.cropDemand();
   const ranked = rankCrops(eco, { gold: state.gold, level: state.level, objective });
-  const best = ranked[0];
+  const demanded = ranked.find(c => demand[c.id] > 0);
+  const best = demanded || ranked[0];
+
   if (best) {
     let planted = 0;
     for (const t of state.tilledEmpty()) {
@@ -27,8 +31,11 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
 
 export function planClaims(state) {
   const plan = [];
-  for (const q of state.quests || []) if (q.complete && !q.claimed) plan.push({ kind:'quest', event:'starter:complete/request', payload:{ taskId:q.id }, meta:null });
-  for (const j of state.jobs || []) if (j.complete && !j.claimed) plan.push({ kind:'job', event:'farmJob:claim/request', payload:{ jobId:j.id }, meta:null });
-  for (const o of state.orders || []) if (o.fulfillable && !o.claimed) plan.push({ kind:'order', event:'order:complete/request', payload:{ orderId:o.id }, meta:null });
+  if (state.starterTasks?.currentTaskId)
+    plan.push({ kind:'starter', event:'starter:complete/request', payload:{ taskId: state.starterTasks.currentTaskId }, meta:null });
+  for (const o of state.completableOrders())
+    plan.push({ kind:'order', event:'order:complete/request', payload:{ orderId: o.id }, meta:null });
+  for (const j of state.claimableJobs())
+    plan.push({ kind:'job', event:'farmJob:claim/request', payload:{ jobId: j.id }, meta:null });
   return plan;
 }

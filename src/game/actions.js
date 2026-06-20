@@ -12,6 +12,8 @@ export class ActionRunner {
     this.walk = opts.walk ?? true;
     this.backoff = opts.backoffMs ?? 1200;
     this.pos = { x: 784, y: 784 };
+    this.lastTool = null;
+    this.lastSeed = null;
   }
 
   do(event, payload, meta) {
@@ -44,6 +46,12 @@ export class ActionRunner {
   }
 
   async _run(event, payload, meta, attempt = 0) {
+    if (meta && (meta.tool !== this.lastTool || (meta.seedId && meta.seedId !== this.lastSeed))) {
+      this.s.emitAction('player:tool/select', { tool: meta.tool, seedId: meta.seedId || 'none' });
+      this.lastTool = meta.tool;
+      this.lastSeed = meta.seedId || null;
+      await sleep(gaussianDelay(120, 350));
+    }
     if (meta && payload.tileX != null) await this._walkTo(payload.tileX, payload.tileY);
     const id = mkActionId(meta?.action || 'act');
     const full = {

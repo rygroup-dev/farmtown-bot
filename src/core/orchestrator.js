@@ -4,7 +4,7 @@ import { log } from '../logger.js';
 import { Rest } from '../net/rest.js';
 import { loadSession, saveSession, refreshSupabase, supabaseExpiringSoon, keepWalletSessionAlive } from '../auth/session.js';
 import { bootstrapSession } from '../auth/bootstrap.js';
-import { bindWallet } from '../auth/wallet.js';
+import { bindWallet, walletSessionPlayerId } from '../auth/wallet.js';
 import { GameSocket } from '../net/socket.js';
 import { GameState } from '../game/state.js';
 import { ActionRunner } from '../game/actions.js';
@@ -26,9 +26,12 @@ export async function runAccount() {
   if (supabaseExpiringSoon(session)) await refreshSupabase(session, rest);
   if (session.cookieHeader) rest.setCookie(session.cookieHeader);
   rest.setBearer(session.access_token);
-  await bindWallet(rest);
-  session.persistentPlayerId = session.persistentPlayerId || crypto.randomUUID();
+  const verified = await bindWallet(rest);
+  session.walletSessionToken = verified.walletSessionToken;
+  rest.setWalletSession(session.walletSessionToken); // x-farmtown-wallet-session header for /api/auth/session keepalive
+  session.persistentPlayerId = walletSessionPlayerId(session.walletSessionToken) || session.persistentPlayerId || crypto.randomUUID();
   saveSession(session);
+  log.info('AUTH', `gameplayAllowed wallet=${verified.walletAddress} player=${session.persistentPlayerId}`);
 
   const tg = startTelegram({
     state, flags,
@@ -37,15 +40,18 @@ export async function runAccount() {
     manual: (kind, arg) => manualQueue.push({ kind, arg }),
   });
 
-  let gs, runner;
+  let gs, runner, lastStateLog = 0;
   function connect() {
-    gs = new GameSocket({ accessToken: session.access_token, displayName: config.displayName, persistentPlayerId: session.persistentPlayerId }).connect();
+    gs = new GameSocket({ accessToken: session.access_token, walletSessionToken: session.walletSessionToken, displayName: config.displayName, persistentPlayerId: session.persistentPlayerId }).connect();
     runner = new ActionRunner(gs);
     gs.on('event', (ev, data) => {
       state.apply(ev, data);
       if (ev === 'player:farmState/sync' && !stats.goldStart) stats.goldStart = state.gold;
+      if (ev === 'game:actionResult' && data.ok) log.info('ACT', (data.type || '?') + ' ok' + (data.message ? (' — ' + data.message) : ''));
+      if (ev === 'game:error' || ev === 'farm:error') log.warn('GAMEERR', (data.code || '?') + ' ' + (data.message || ''));
+      if (ev === 'player:farmState/sync') { const now = Date.now(); if (now - lastStateLog >= 30000) { lastStateLog = now; log.info('STATE', 'gold=' + state.gold + ' level=' + state.level + ' stars=' + state.stars); } }
     });
-    gs.on('joined', () => { flags.connected = true; tg.notify('🟢 joined farm — level ' + state.level + ' gold ' + state.gold); });
+    gs.on('joined', () => { flags.connected = true; log.info('JOINED', 'farm gold=' + state.gold + ' level=' + state.level); tg.notify('🟢 joined farm — level ' + state.level + ' gold ' + state.gold); });
     gs.on('down', () => { flags.connected = false; tg.notify('🔴 disconnected — reconnecting'); });
   }
   connect();
@@ -84,5 +90,5 @@ async function handleManual(m, { state, runner, flags }) {
   if (m.kind === 'harvest') for (const t of state.readyToHarvest()) await runner.do('crop:harvest/request', { tileX: t.x, tileY: t.y }, { action: 'harvest', tool: 'hoe' });
   if (m.kind === 'plant' && m.arg) for (const t of state.tilledEmpty()) await runner.do('crop:plant/request', { tileX: t.x, tileY: t.y, seedId: `${m.arg}_seed` }, { action: 'plant', tool: 'seed_bag', seedId: `${m.arg}_seed` });
   if (m.kind === 'buyplot') { const b = state.buyableTiles()[0]; if (b) await runner.do('plot:buy/request', { tileX: b.x, tileY: b.y }, null); }
-  // 'sellall' is a no-op until a sell endpoint is discovered in live capture (documented gap)
+  if (m.kind === 'sellall') log.info('MANUAL', 'sellall is a no-op — gold comes from completing orders (auto)');
 }

@@ -17,3 +17,39 @@ test('applies tile updates and indexes owned/ready tiles', () => {
   assert.strictEqual(s.tilledEmpty().length, 1);
   assert.strictEqual(s.readyToHarvest().length, 1);
 });
+
+test('completableOrders + cropDemand use cropInventory', () => {
+  const s = new GameState();
+  s.apply('player:farmState/sync', { farmState: {
+    cropInventory: { potato: 5, carrot: 1 },
+    orders: [
+      { id:'o1', requires:{ potato:3 }, rewards:{gold:90,xp:25} },
+      { id:'o2', requires:{ carrot:2 }, rewards:{gold:50,xp:10} }
+    ]
+  } });
+  assert.strictEqual(s.completableOrders().length, 1);
+  assert.strictEqual(s.completableOrders()[0].id, 'o1');
+  assert.strictEqual(s.cropDemand().potato, 3);
+  assert.strictEqual(s.cropDemand().carrot, 2);
+});
+
+test('claimableJobs returns jobs where current >= target', () => {
+  const s = new GameState();
+  s.apply('player:farmState/sync', { farmState: {
+    farmJobs: [
+      { id:'j1', current:5, target:5, rewards:{gold:10,xp:5} },
+      { id:'j2', current:2, target:10, rewards:{gold:20,xp:10} }
+    ]
+  } });
+  assert.strictEqual(s.claimableJobs().length, 1);
+  assert.strictEqual(s.claimableJobs()[0].id, 'j1');
+});
+
+test('starterTasks applied from farmState sync', () => {
+  const s = new GameState();
+  s.apply('player:farmState/sync', { farmState: {
+    starterTasks: { currentTaskId: 'task3', completed: ['task1', 'task2'], starterSeedsGranted: true }
+  } });
+  assert.strictEqual(s.starterTasks.currentTaskId, 'task3');
+  assert.strictEqual(s.starterTasks.completed.length, 2);
+});
