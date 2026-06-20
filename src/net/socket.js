@@ -15,12 +15,11 @@ export class GameSocket extends EventEmitter {
   }
 
   connect() {
+    // reconnection handled by the orchestrator so every reconnect uses FRESH
+    // tokens (supabase access_token ~1h, walletSessionToken ~30m both expire).
     this.socket = io(config.realtimeUrl, {
       transports: ['websocket'],
-      reconnection: true,
-      reconnectionDelay: 1500,
-      reconnectionDelayMax: 15000,
-      randomizationFactor: 0.5,
+      reconnection: false,
       auth: {
         accessToken: this.accessToken,
         walletSessionToken: this.walletSessionToken,
@@ -55,9 +54,12 @@ export class GameSocket extends EventEmitter {
       this.emit('down', r);
     });
 
-    this.socket.on('connect_error', (e) =>
-      log.warn('WS', 'connect_error ' + e.message),
-    );
+    this.socket.on('connect_error', (e) => {
+      log.warn('WS', 'connect_error ' + e.message);
+      this.ready = false;
+      this.stopPing();
+      this.emit('down', 'connect_error: ' + e.message);
+    });
 
     this.socket.onAny((event, ...args) =>
       this.emit('event', event, args.length === 1 ? args[0] : args),

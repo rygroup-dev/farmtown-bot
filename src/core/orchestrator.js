@@ -40,7 +40,17 @@ export async function runAccount() {
     manual: (kind, arg) => manualQueue.push({ kind, arg }),
   });
 
-  let gs, runner, lastStateLog = 0;
+  // Re-auth so every (re)connect uses fresh tokens (supabase ~1h, walletSession ~30m).
+  async function reauth() {
+    if (supabaseExpiringSoon(session)) await refreshSupabase(session, rest);
+    rest.setBearer(session.access_token);
+    const v = await bindWallet(rest);
+    session.walletSessionToken = v.walletSessionToken;
+    rest.setWalletSession(v.walletSessionToken);
+    saveSession(session);
+  }
+
+  let gs, runner, lastStateLog = 0, reconnecting = false;
   function connect() {
     gs = new GameSocket({ accessToken: session.access_token, walletSessionToken: session.walletSessionToken, displayName: config.displayName, persistentPlayerId: session.persistentPlayerId }).connect();
     runner = new ActionRunner(gs);
@@ -51,8 +61,30 @@ export async function runAccount() {
       if (ev === 'game:error' || ev === 'farm:error') log.warn('GAMEERR', (data.code || '?') + ' ' + (data.message || ''));
       if (ev === 'player:farmState/sync') { const now = Date.now(); if (now - lastStateLog >= 30000) { lastStateLog = now; log.info('STATE', 'gold=' + state.gold + ' level=' + state.level + ' stars=' + state.stars); } }
     });
-    gs.on('joined', () => { flags.connected = true; log.info('JOINED', 'farm gold=' + state.gold + ' level=' + state.level); tg.notify('🟢 joined farm — level ' + state.level + ' gold ' + state.gold); });
-    gs.on('down', () => { flags.connected = false; tg.notify('🔴 disconnected — reconnecting'); });
+    gs.on('joined', () => { flags.connected = true; reconnecting = false; log.info('JOINED', 'farm gold=' + state.gold + ' level=' + state.level); tg.notify('🟢 joined farm — level ' + state.level + ' gold ' + state.gold); });
+    gs.on('down', (reason) => { flags.connected = false; scheduleReconnect(reason); });
+  }
+
+  let reconnectAttempt = 0;
+  async function scheduleReconnect(reason) {
+    if (reconnecting || !flags.running) return;
+    reconnecting = true;
+    try { gs?.close(); } catch {}
+    const backoff = Math.min(2000 * 2 ** reconnectAttempt, 30000) + gaussianDelay(500, 2500);
+    reconnectAttempt++;
+    log.warn('WS', `down (${reason}) — reconnect in ${Math.round(backoff / 1000)}s (attempt ${reconnectAttempt})`);
+    tg.notify('🔴 disconnected — reconnecting');
+    await sleep(backoff);
+    if (!flags.running) return;
+    try {
+      await reauth();
+      reconnectAttempt = 0;
+      connect();
+    } catch (e) {
+      log.error('RECONNECT', e.message);
+      reconnecting = false;
+      scheduleReconnect('reauth-failed');
+    }
   }
   connect();
 
@@ -78,7 +110,7 @@ export async function runAccount() {
           if (a.kind === 'harvest' && ok) stats.harvests++;
           if (a.kind === 'plant' && ok) stats.plants++;
         }
-        if (maybeBreak(0.04)) { const b = gaussianDelay(20000, 90000); log.info('TICK', 'human break ' + b + 'ms'); await sleep(b); }
+        if (maybeBreak(0.02)) { const b = gaussianDelay(8000, 30000); log.info('TICK', 'human break ' + b + 'ms'); await sleep(b); }
       }
     } catch (e) { log.error('TICK', e.message); }
     await sleep(gaussianDelay(4000, 9000));
