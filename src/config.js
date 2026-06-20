@@ -12,6 +12,7 @@ export const config = {
   apiOrigin: process.env.API_ORIGIN || 'https://play.farmtown.online',
   realtimeUrl: process.env.REALTIME_URL || 'https://realtime.farmtown.online',
   supabaseUrl: process.env.SUPABASE_URL || 'https://irarxwyrpmmxacrbvpnz.supabase.co',
+  supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
   roomId: process.env.ROOM_ID || 'farmtown-dev',
   displayName: process.env.DISPLAY_NAME || 'ohmaygawd',
   keypair: loadKeypair(process.env.SOLANA_SECRET_KEY),
