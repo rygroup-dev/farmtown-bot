@@ -49,6 +49,10 @@ export class GameState {
       }
       case 'game:actionResult': {
         if (data.ok && data.inventoryDelta?.seeds) for (const [k, v] of Object.entries(data.inventoryDelta.seeds)) this.inventory[k] = (this.inventory[k] || 0) + v;
+        // The action result carries the updated tile(s) — apply immediately so the next
+        // tick doesn't re-target an already-harvested/changed tile ("Nothing ready" race).
+        if (data.ok && data.tile) this.tiles.set(this.key(data.tile.x, data.tile.y), data.tile);
+        if (data.ok) for (const t of (data.changedTiles || [])) this.tiles.set(this.key(t.x, t.y), t);
         break;
       }
     }
@@ -62,7 +66,7 @@ export class GameState {
   blocked() { return this.ownedTiles().filter(t => t.blocker && t.blocker !== 'none'); }
   // Ready to harvest, with a 1.5s buffer so we never fire before the SERVER agrees
   // (avoids "Nothing ready" races), and excluding crops that have already died.
-  readyToHarvest() { const now = Date.now(); return this.ownedTiles().filter(t => t.cropId && t.readyAt && t.readyAt <= now - 1500 && (!t.diesAt || t.diesAt > now)); }
+  readyToHarvest() { const now = Date.now(); return this.ownedTiles().filter(t => t.cropId && t.readyAt && t.readyAt <= now - 3000 && (!t.diesAt || t.diesAt > now)); }
   buyableTiles() { return [...this.tiles.values()].filter(t => t.ownerState === 'buyable' || t.ownerState === 'locked'); }
   // Locked tiles orthogonally adjacent to owned land — the only plots you can buy
   // ("Locked tiles must be adjacent to your owned area"). Server validates the price.
