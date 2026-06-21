@@ -37,7 +37,7 @@ cat <<'BANNER'
   ██╔══╝  ██╔══██║██╔══██╗██║╚██╔╝██║   ██║   ██║   ██║██║███╗██║██║╚██╗██║
   ██║     ██║  ██║██║  ██║██║ ╚═╝ ██║   ██║   ╚██████╔╝╚███╔███╔╝██║ ╚████║
   ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝   ╚═╝    ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═══╝
-            S E N T I N E L  —  headless 24/7 farming bot
+         S E N T I N E L  —  a RY GROUP project · 24/7 farm bot
 
 BANNER
 
@@ -112,6 +112,17 @@ TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID
 ACTIVE_HOURS=${ACTIVE_HOURS:-06:00-23:30}
 SOLANA_RPC=https://api.mainnet-beta.solana.com
 WITHDRAW_ADDRESS=$WITHDRAW_ADDRESS
+
+# --- Farmer Pool strategy (optional) ---
+POOL_BURN_GOLD=off
+POOL_BURN_LEVELS=off
+POOL_LEVEL_FLOOR=13
+POOL_SACRIFICE_AT=30
+
+# --- Multi-account (optional) — see README. Generate subs via Telegram /genwallets ---
+MULTI_ACCOUNT=off
+MULTI_ACCOUNT_LIMIT=0
+CAPTCHA_API_KEY=
 ENV
   chmod 600 .env
   mkdir -p data && chmod 700 data
@@ -175,5 +186,7 @@ else
 fi
 say ""
 say "Useful Telegram commands: ${B}/status /balance /pool /orders /auth /stop /start /help${X}"
+say "Multi-account (optional): ${B}/genwallets <n>${X} → set ${B}CAPTCHA_API_KEY${X} + ${B}MULTI_ACCOUNT=on${X} → restart."
+say "Run up to 50 farms from one bot; sub \$FARM auto-sweeps to your main wallet. See README."
 say "Full guide: ${C}$DIR/README.md${X}"
-say "${B}═══════════════════════════════════════════════════════════════════════${X}"
+say "${B}════════════════════════ RY GROUP ════════════════════════${X}"

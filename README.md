@@ -1,13 +1,29 @@
 # FarmTown Sentinel 🌾
 
-A headless, 24/7 automation bot for **[play.farmtown.online](https://play.farmtown.online)**.
-It farms gold/XP, completes orders, jobs and quests, auto-expands your land, earns
-**$FARM** from the Farmer's Pool, and is fully controllable from **Telegram** — built
-for resilience with anti-ban timing, anti-cheat-safe serial actions, auto-reconnect,
-and automatic session refresh.
+> **A RY GROUP project** — a headless, 24/7 automation engine for
+> **[play.farmtown.online](https://play.farmtown.online)**.
 
-> ⚠️ **Use a burner Solana wallet, not your main one.** This is automation against a
-> live game — run it at your own risk. Never share or commit your `.env`.
+Farms gold/XP, completes orders/jobs/quests, auto-expands land, earns withdrawable
+**$FARM** from the Farmer's Pool, and runs **up to 50 accounts at once** — all from one
+**Telegram** bot. Built for resilience: anti-ban timing, anti-cheat-safe serial actions,
+auto-reconnect, self-refreshing sessions, and a degraded-server/maintenance detector.
+
+### ✨ Highlights
+- 🧠 **Smart farming brain** — order-demand-aware planting, 70/30 profit/variety crop mix,
+  dead-crop recovery, aggressive-but-safe land expansion, storage upgrades.
+- 💎 **Farmer's Pool ($FARM)** — auto-contributes free farm-points repeatedly; optional
+  surplus-gold and **level-sacrifice** strategies (with hard guardrails).
+- 👥 **Multi-account** — 1 main + up to 49 auto-generated sub-wallets, each its own
+  farm/session, with **captcha auto-login** (no per-account browser paste) and
+  auto-sweep of all $FARM to your main wallet.
+- 📱 **Telegram control** — 40+ commands: status, balances, manual actions, multi-account
+  monitoring, live re-login, and proactive alerts.
+- 🛡️ **Resilient & quiet** — gaussian human timing, active-hours sleep, zombie-connection
+  watchdog, low auth churn, and clear server-degraded/recovered notifications.
+
+> ⚠️ **Use burner Solana wallets, never your main one.** This automates a live game —
+> run it at your own risk. Secrets live only in your `.env` / `data/` (both git-ignored);
+> never share or commit them.
 
 ---
 
@@ -69,7 +85,30 @@ truly dies it will message you on Telegram with the same one-liner to re-paste.
 | `WITHDRAW_ADDRESS` | ➖ | Your main wallet to withdraw earned `$FARM` to. Blank = withdraw disabled. |
 | `SOLANA_RPC` | ➖ | RPC for `/wallet` balance + withdraw. Default is the public (rate-limited) endpoint. |
 | `FARMER_POOL` | ➖ | `off` to disable Farmer's Pool earning. Default on. |
-| `POOL_BURN_GOLD` | ➖ | `on` to also burn gold into the pool (default: only free farm-points). |
+| `POOL_BURN_GOLD` | ➖ | `on` to also burn surplus gold into the pool (default: only free farm-points). |
+| `POOL_BURN_LEVELS` | ➖ | `on` to **sacrifice levels** into the pool for claim power (advanced). Default off. |
+| `POOL_LEVEL_FLOOR` | ➖ | Never sacrifice below this level. Default `10` (recommended `13` to keep mid crops). |
+| `POOL_SACRIFICE_AT` | ➖ | Only sacrifice once an account reaches this level. Default `0` (always); use `30` (max) to only burn wasted post-cap XP. |
+| `MULTI_ACCOUNT` | ➖ | `on` to run sub-accounts concurrently (see Multi-account). Default off. |
+| `MULTI_ACCOUNT_LIMIT` | ➖ | Cap how many generated subs actually run (`0` = all). Stage the rollout. |
+| `CAPTCHA_API_KEY` | ➖ | 2Captcha/Anti-Captcha/CapMonster key → auto-mints a session per sub (no paste). |
+| `CAPTCHA_ENDPOINT` | ➖ | Override the solver host (default `https://api.2captcha.com`). |
+
+---
+
+## 🧠 The farming brain
+
+Each tick the planner runs, in order: **harvest** ripe crops (on the server's authoritative
+`ready` state, even slightly overdue) → **clear dead crops** (unsticks tiles after long
+downtime) → **clear blockers** (pickaxe for rock/stone, axe for trees/weeds) → **hoe** →
+**plant** → **buy seeds** → **claim** starter tasks, orders & farm jobs → **auto-expand**
+adjacent plots → **upgrade storage**.
+
+Crop choice is **order-demand-aware**: it sows exactly what your open orders need first
+(case-insensitive, netted against your basket and what's already growing — orders are the
+main gold source), then fills the rest with a **70 / 30 split** — ~70 % your best profit/hr
+crop, ~30 % rotated variety (seeds future orders, crop mastery and quests). Expansion uses
+a **farm-size-scaled gold reserve** so a big farm never starves its own re-planting.
 
 ---
 
@@ -84,26 +123,14 @@ truly dies it will message you on Telegram with the same one-liner to re-paste.
 **Actions** — `/harvest` `/plant <crop>` `/plantall <crop>` `/buyplot` `/buyseed <crop> [qty]`
 `/upgradestorage` `/claimpool` `/auth <paste>` `/reconnect` `/restart`
 
+**Multi-account** — `/accounts` `/genwallets <n>` `/mintsession` `/sweep`
+
 **Diagnostics** — `/log [n]` `/ping` `/help`
 
-The bot also **pushes alerts**: 🟢 joined, 🔴 disconnected, 🟠 **server degraded /
-maintenance** (with "safe to /stop now, /start later" guidance), ✅ **server recovered**,
-and ⚠️ **session expired** (with the re-paste one-liner).
-
----
-
-## 🧠 How it farms (the brain)
-
-Each tick the planner runs, in order: **harvest** ready crops → **clear** blockers
-(pickaxe for rock/stone, axe for trees/weeds) → **hoe** → **plant** → **buy seeds** →
-**claim** starter tasks, orders and jobs → **auto-expand** adjacent plots → **upgrade
-storage**.
-
-Crop selection is **order-demand-aware**: it first sows exactly what your open orders
-need (case-insensitive, netted against your basket and what's already growing — orders
-are the main gold source), then fills the rest of your tiles with a **70 / 30 split**:
-~70 % your highest profit/hr crop, ~30 % rotated variety (seeds future orders, crop
-mastery and quest chapters — no brittle monoculture).
+The bot also **pushes alerts**: 🟢 joined (labelled per account, with real level/gold),
+🔴 disconnected, 🟠 **server degraded / maintenance** (with "safe to /stop now, /start
+later" guidance), ✅ **server recovered**, and ⚠️ **session expired** (with the re-paste
+one-liner).
 
 ---
 
@@ -154,16 +181,25 @@ at a time**, and anonymous sign-up is captcha-gated — so *each account needs i
 session*. With a `CAPTCHA_API_KEY` the bot **auto-mints** a session per sub (no browser
 paste); you only fund each sub a little SOL for gas.
 
+**Setup**
 ```
-/genwallets 5          # create 5 sub-wallets (data/wallets.json, chmod 600)
-/accounts              # list all wallets + on-chain SOL/$FARM + live level/gold
-/mintsession           # verify your captcha key works (mints a throwaway session)
-# fund each sub's address with a little SOL, then set MULTI_ACCOUNT=on and restart
-/sweep                 # force-collect all sub $FARM → main (also automatic ~every 1.5h)
+/genwallets 10         # generate 10 sub-wallets (data/wallets.json, chmod 600)
+/mintsession           # verify your CAPTCHA_API_KEY works (mints a throwaway session)
+/accounts              # list every wallet + on-chain SOL/$FARM + live level/gold
+# in .env:  MULTI_ACCOUNT=on   MULTI_ACCOUNT_LIMIT=5   →  systemctl restart
+/accounts              # watch subs mint sessions, join, and grind starter tasks
+/sweep                 # collect all sub $FARM → main (also automatic ~every 1.5h)
 ```
 
-Gated behind `MULTI_ACCOUNT=off` by default — the single-account path above is unchanged.
-Verify with 1–2 subs before scaling up. `/accounts` and `/sweep` work even without the engine on.
+- **`MULTI_ACCOUNT_LIMIT`** stages the rollout — start at 5, verify, then raise.
+- Sub-accounts farm with **0 SOL**; they only need a little SOL when they *sweep* $FARM
+  to main (auto-skipped until funded).
+- **Level-sacrifice** (`POOL_BURN_LEVELS=on`, `POOL_LEVEL_FLOOR=13`, `POOL_SACRIFICE_AT=30`)
+  pairs well here: at max level, accounts convert otherwise-wasted XP into pool claim power.
+- Gated behind `MULTI_ACCOUNT=off` by default — the single-account path is untouched.
+
+> ⚠️ **Ban risk:** many accounts farming 24/7 from a single IP is a detectable pattern.
+> Scale gradually and consider per-account proxies. `/accounts` + `/sweep` work regardless.
 
 ## 🖥️ Running 24/7 (systemd)
 
