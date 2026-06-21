@@ -13,7 +13,7 @@ test('applies farmState sync', () => {
 test('applies tile updates and indexes owned/ready tiles', () => {
   const s = new GameState();
   s.apply('tile:update', { tile: { x:25, y:23, ownerState:'owned', groundState:'tilled', blocker:'none', cropId:null } });
-  s.apply('tile:update', { tile: { x:25, y:24, ownerState:'owned', groundState:'planted', cropId:'potato', plantedAt: Date.now()-10000, readyAt: Date.now()-1 } });
+  s.apply('tile:update', { tile: { x:25, y:24, ownerState:'owned', groundState:'planted', cropId:'potato', plantedAt: Date.now()-10000, readyAt: Date.now()-5000 } });
   assert.strictEqual(s.tilledEmpty().length, 1);
   assert.strictEqual(s.readyToHarvest().length, 1);
 });

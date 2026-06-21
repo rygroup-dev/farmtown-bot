@@ -8,7 +8,7 @@ const eco = { potato: { id:'potato', seedId:'potato_seed', cost:3, sell:6, growS
 test('plans harvest before plant', () => {
   const s = new GameState();
   s.gold = 100; s.inventory.potato_seed = 5;
-  s.tiles.set('25,24', { x:25,y:24, ownerState:'owned', groundState:'planted', cropId:'potato', readyAt: Date.now()-1 });
+  s.tiles.set('25,24', { x:25,y:24, ownerState:'owned', groundState:'planted', cropId:'potato', readyAt: Date.now()-5000 });
   s.tiles.set('25,25', { x:25,y:25, ownerState:'owned', groundState:'tilled', blocker:'none', cropId:null });
   const plan = planActions(s, eco, { objective:'gold' });
   assert.strictEqual(plan[0].kind, 'harvest');

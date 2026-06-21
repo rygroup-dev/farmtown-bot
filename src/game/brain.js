@@ -29,13 +29,13 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
     }
   }
 
-  // Auto-expand: when the farm is fully worked AND we have spare gold, unlock ONE
-  // adjacent locked plot. New plots arrive "wild" (blockers) → cleared → hoed →
-  // planted by the loops above on later ticks. Grows capacity = more profit.
+  // Auto-expand AGGRESSIVELY: keep buying adjacent locked plots while we have spare
+  // gold, but don't hoard wild land faster than we can work it — only expand while the
+  // backlog of unworked owned tiles (blockers + needs-hoe + tilled-empty) stays small.
+  // New plots arrive "wild" → cleared → hoed → planted by the loops above next ticks.
   const expandable = state.expandableTiles();
-  const farmFull = state.hoeable().length === 0 && state.tilledEmpty().length === 0
-    && state.readyToHarvest().length === 0 && state.blocked().length === 0;
-  if (expandable.length && farmFull && state.gold >= goldReserve) {
+  const unworked = state.blocked().length + state.hoeable().length + state.tilledEmpty().length;
+  if (expandable.length && state.gold >= goldReserve && unworked < 8) {
     const t = expandable[0];
     plan.push({ kind:'buyPlot', event:'plot:buy/request', payload:{ tileX:t.x, tileY:t.y }, meta:null });
   }

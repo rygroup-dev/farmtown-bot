@@ -60,7 +60,9 @@ export class GameState {
   // after a blocker is cleared or a crop is harvested/removed). Both → hoe → 'tilled'.
   hoeable() { return this.ownedTiles().filter(t => (t.groundState === 'grass' || t.groundState === 'cleared') && t.blocker === 'none' && !t.cropId); }
   blocked() { return this.ownedTiles().filter(t => t.blocker && t.blocker !== 'none'); }
-  readyToHarvest() { const now = Date.now(); return this.ownedTiles().filter(t => t.cropId && t.readyAt && t.readyAt <= now); }
+  // Ready to harvest, with a 1.5s buffer so we never fire before the SERVER agrees
+  // (avoids "Nothing ready" races), and excluding crops that have already died.
+  readyToHarvest() { const now = Date.now(); return this.ownedTiles().filter(t => t.cropId && t.readyAt && t.readyAt <= now - 1500 && (!t.diesAt || t.diesAt > now)); }
   buyableTiles() { return [...this.tiles.values()].filter(t => t.ownerState === 'buyable' || t.ownerState === 'locked'); }
   // Locked tiles orthogonally adjacent to owned land — the only plots you can buy
   // ("Locked tiles must be adjacent to your owned area"). Server validates the price.
