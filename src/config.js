@@ -18,6 +18,8 @@ export const config = {
   keypair: loadKeypair(process.env.SOLANA_SECRET_KEY),
   telegram: { token: process.env.TELEGRAM_BOT_TOKEN || '', chatId: process.env.TELEGRAM_CHAT_ID || '' },
   activeHours: process.env.ACTIVE_HOURS || '06:00-23:30',
+  solanaRpc: process.env.SOLANA_RPC || 'https://api.mainnet-beta.solana.com',
+  withdrawAddress: process.env.WITHDRAW_ADDRESS || '',
   tile: { size: 32, originPx: 16 },
   limits: { maxPendingActions: 1, minActionGapMs: 900, maxActionGapMs: 2600 },
   pool: {

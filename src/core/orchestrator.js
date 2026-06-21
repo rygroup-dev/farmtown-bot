@@ -12,6 +12,7 @@ import { ActionRunner } from '../game/actions.js';
 import { planActions, planClaims, planStorage } from '../game/brain.js';
 import { loadEconomy } from '../game/economy.js';
 import { maybeContribute, pollFarmerPool } from '../game/farmerpool.js';
+import { getWalletInfo, withdrawFarm } from '../game/wallet_info.js';
 import { withinActiveHours, secondsUntilInactive, sleep, gaussianDelay, maybeBreak } from '../safety/humanizer.js';
 import { startTelegram } from '../telegram/bot.js';
 
@@ -65,6 +66,10 @@ export async function runAccount() {
     tailLog: (n = 20) => { try { return fs.readFileSync('data/bot.log', 'utf8').trim().split('\n').slice(-n).join('\n'); } catch { return '(no log yet)'; } },
     pool: () => pollFarmerPool(rest),
     claimPool: () => maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve }),
+    walletInfo: () => getWalletInfo(),
+    withdraw: () => withdrawFarm(config.withdrawAddress),
+    withdrawAddress: config.withdrawAddress,
+    starBundles: async () => { const r = await rest.req('/api/token/stars/bundles', { timeoutMs: 20000 }); return r.json?.bundles || []; },
     manual: (kind, arg) => manualQueue.push({ kind, arg }),
     setConfig: (key, val) => {
       if (key === 'activeHours') settings.activeHours = val;

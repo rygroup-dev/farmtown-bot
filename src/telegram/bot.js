@@ -243,6 +243,60 @@ export async function dispatchCommand(text, ctx, send) {
   }
 }
 
+// /wallet panel with inline deposit/withdraw buttons. Returns { text, reply_markup }.
+export async function renderWallet(ctx) {
+  let info = { address: ctx.walletAddress, sol: 0, farm: 0 };
+  try { if (ctx.walletInfo) info = await ctx.walletInfo(); } catch { /* RPC may fail */ }
+  const text =
+    `👛 <b>Wallet</b>\n` +
+    `<code>${esc(info.address)}</code>\n\n` +
+    `◎ SOL: <b>${(info.sol || 0).toFixed(4)}</b>\n` +
+    `🌾 $FARM: <b>${fmt(Math.floor(info.farm || 0))}</b>\n` +
+    `⭐ Stars (in-game): <b>${fmt(ctx.state.stars)}</b>\n\n` +
+    `<i>Withdraw = claim/move earned $FARM to your wallet.\nDeposit = buy Stars with $FARM (in-game premium).</i>`;
+  const rows = [
+    [{ text: '💎 Claim Pool $FARM', callback_data: 'wallet:claim' }],
+    [{ text: '📤 Withdraw $FARM', callback_data: 'wallet:withdraw' }, { text: '⭐ Deposit (Buy Stars)', callback_data: 'wallet:deposit' }],
+    [{ text: '🔄 Refresh', callback_data: 'wallet:refresh' }],
+  ];
+  return { text, reply_markup: { inline_keyboard: rows } };
+}
+
+// Handle a wallet:* inline-button press. Returns { text, reply_markup?, alert? }.
+export async function handleWalletCallback(data, ctx) {
+  switch (data) {
+    case 'wallet:refresh':
+      return renderWallet(ctx);
+    case 'wallet:claim': {
+      const r = await ctx.claimPool();
+      const alert = r?.contributed ? '✅ Claimed claim power — earning $FARM' : `ℹ️ ${r?.reason || 'not eligible / pool not open'}`;
+      const w = await renderWallet(ctx);
+      return { ...w, alert };
+    }
+    case 'wallet:withdraw': {
+      if (!ctx.withdrawAddress) return { text: '📤 <b>Withdraw</b>\n❌ No WITHDRAW_ADDRESS set in .env. Add your main wallet address there to enable withdrawals.', reply_markup: { inline_keyboard: [[{ text: '⬅️ Back', callback_data: 'wallet:refresh' }]] } };
+      return { text: `📤 <b>Withdraw $FARM</b>\nSend ALL $FARM from the bot wallet to:\n<code>${esc(ctx.withdrawAddress)}</code>\n\nConfirm?`, reply_markup: { inline_keyboard: [[{ text: '✅ Confirm withdraw', callback_data: 'wallet:withdraw_confirm' }], [{ text: '⬅️ Cancel', callback_data: 'wallet:refresh' }]] } };
+    }
+    case 'wallet:withdraw_confirm': {
+      const r = await ctx.withdraw();
+      const w = await renderWallet(ctx);
+      if (r?.ok) return { ...w, alert: `✅ Withdrew ${r.amount} FARM` };
+      return { ...w, alert: `❌ ${r?.reason || 'withdraw failed'}` };
+    }
+    case 'wallet:deposit': {
+      let bundles = [];
+      try { bundles = (await ctx.starBundles?.()) || []; } catch {}
+      const lines = bundles.map(b => `• <b>${esc(b.displayName)}</b> — ${fmt(b.totalStars)}⭐ (~$${b.targetUsdValue})`).join('\n');
+      return {
+        text: `⭐ <b>Deposit — Buy Stars</b>\n${lines || 'No bundles.'}\n\n<i>Stars are bought with $FARM in-game (sends $FARM to the treasury). Auto-purchase is disabled for safety — buy from the website to avoid accidental spend.</i>`,
+        reply_markup: { inline_keyboard: [[{ text: '⬅️ Back', callback_data: 'wallet:refresh' }]] },
+      };
+    }
+    default:
+      return { text: '❓ Unknown action', reply_markup: { inline_keyboard: [[{ text: '⬅️ Back', callback_data: 'wallet:refresh' }]] } };
+  }
+}
+
 export function startTelegram(ctx) {
   if (!config.telegram.token) {
     log.warn('TG', 'no token — telegram disabled');
@@ -255,7 +309,29 @@ export function startTelegram(ctx) {
 
   bot.setMyCommands(COMMAND_MENU.map(([command, description]) => ({ command, description }))).catch(() => {});
 
-  bot.on('message', (msg) => { if (guard(msg)) dispatchCommand(msg.text, ctx, send); });
+  bot.on('message', async (msg) => {
+    if (!guard(msg)) return;
+    const cmd = (msg.text || '').trim().split(/\s+/)[0].toLowerCase();
+    if (cmd === '/wallet') {
+      const w = await renderWallet(ctx);
+      bot.sendMessage(chatId, w.text, { parse_mode: 'HTML', reply_markup: w.reply_markup }).catch((e) => log.warn('TG', 'send failed: ' + e.message));
+      return;
+    }
+    dispatchCommand(msg.text, ctx, send);
+  });
+
+  bot.on('callback_query', async (q) => {
+    if (String(q.message?.chat?.id) !== String(chatId)) return;
+    try {
+      const r = await handleWalletCallback(q.data, ctx);
+      await bot.answerCallbackQuery(q.id, { text: r.alert || '' }).catch(() => {});
+      await bot.editMessageText(r.text, { chat_id: chatId, message_id: q.message.message_id, parse_mode: 'HTML', reply_markup: r.reply_markup }).catch(() => {});
+    } catch (e) {
+      log.warn('TG', 'callback error: ' + e.message);
+      bot.answerCallbackQuery(q.id, { text: '❌ ' + e.message }).catch(() => {});
+    }
+  });
+
   bot.on('polling_error', (e) => log.warn('TG', 'polling_error: ' + e.message));
   log.info('TG', 'telegram bot polling');
 

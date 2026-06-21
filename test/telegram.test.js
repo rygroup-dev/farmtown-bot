@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { dispatchCommand, COMMAND_MENU } from '../src/telegram/bot.js';
+import { dispatchCommand, COMMAND_MENU, renderWallet, handleWalletCallback } from '../src/telegram/bot.js';
 import { GameState } from '../src/game/state.js';
 import { loadEconomy } from '../src/game/economy.js';
 
@@ -44,6 +44,10 @@ function mockCtx() {
     claimPool: async () => ({ ok: true, contributed: true }),
     manual: (kind, arg) => calls.manual.push([kind, arg]),
     setConfig: (k, v) => { calls.config.push([k, v]); return `${k} = ${v}`; },
+    walletInfo: async () => ({ address: 'di3ekoVELU2R9gw1GoVdAzjcMGDv76iMARGF19YXNTq', sol: 0.12, farm: 4321 }),
+    withdraw: async () => ({ ok: true, amount: 4321, sig: 'sig123' }),
+    withdrawAddress: 'MainWa11etAddressHere11111111111111111111111',
+    starBundles: async () => ([{ displayName: 'Starter', totalStars: 3, targetUsdValue: 5 }]),
   };
   return { ctx, calls };
 }
@@ -127,4 +131,34 @@ test('handles pool() returning null gracefully', async () => {
   const { send, msgs } = recorder();
   await dispatchCommand('/pool', ctx, send);
   assert.match(msgs[0], /unavailable/);
+});
+
+test('renderWallet shows balances + inline deposit/withdraw keyboard', async () => {
+  const { ctx } = mockCtx();
+  const w = await renderWallet(ctx);
+  assert.match(w.text, /\$FARM/);
+  assert.match(w.text, /4,321/);
+  const labels = w.reply_markup.inline_keyboard.flat().map(b => b.callback_data);
+  assert.ok(labels.includes('wallet:claim'));
+  assert.ok(labels.includes('wallet:withdraw'));
+  assert.ok(labels.includes('wallet:deposit'));
+});
+
+test('wallet callbacks: withdraw confirm flow + deposit bundles', async () => {
+  const { ctx } = mockCtx();
+  const wd = await handleWalletCallback('wallet:withdraw', ctx);
+  assert.match(wd.text, /Confirm/);
+  const confirm = await handleWalletCallback('wallet:withdraw_confirm', ctx);
+  assert.match(confirm.alert, /Withdrew 4321/);
+  const dep = await handleWalletCallback('wallet:deposit', ctx);
+  assert.match(dep.text, /Starter/);
+  const claim = await handleWalletCallback('wallet:claim', ctx);
+  assert.ok(claim.reply_markup); // re-renders wallet
+});
+
+test('withdraw without WITHDRAW_ADDRESS shows setup hint', async () => {
+  const { ctx } = mockCtx();
+  ctx.withdrawAddress = '';
+  const wd = await handleWalletCallback('wallet:withdraw', ctx);
+  assert.match(wd.text, /WITHDRAW_ADDRESS/);
 });
