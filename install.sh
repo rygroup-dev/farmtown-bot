@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# ───────────────────────────────────────────────────────────────────────────
+#  FarmTown Sentinel 🌾  — one-line installer
+#
+#  Run:
+#    bash <(curl -fsSL https://raw.githubusercontent.com/rygroup-dev/farmtown-bot/main/install.sh)
+#
+#  It will: install deps → ask for your wallet key + Telegram token interactively
+#  → write a private .env (chmod 600) → optionally set up a 24/7 systemd service
+#  → print the final "paste your session" tutorial.
+#
+#  No credentials are ever printed, logged, or committed. .env is git-ignored.
+# ───────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+
+REPO_URL="${FARMTOWN_REPO:-https://github.com/rygroup-dev/farmtown-bot.git}"
+DIR="${FARMTOWN_DIR:-$HOME/farmtown-bot}"
+TTY="/dev/tty"
+
+# Colors (fall back to plain if no tty)
+if [ -t 1 ]; then B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; C=$'\033[36m'; R=$'\033[31m'; X=$'\033[0m'; else B=; G=; Y=; C=; R=; X=; fi
+say()  { printf '%s\n' "$*"; }
+ok()   { printf '%s✔%s %s\n' "$G" "$X" "$*"; }
+warn() { printf '%s!%s %s\n' "$Y" "$X" "$*"; }
+die()  { printf '%s✗ %s%s\n' "$R" "$*" "$X" >&2; exit 1; }
+ask()  { # ask <var> <prompt> [silent]
+  local __v="$1" __p="$2" __s="${3:-}" __in=""
+  if [ "$__s" = "silent" ]; then read -r -s -p "$__p" __in < "$TTY"; echo; else read -r -p "$__p" __in < "$TTY"; fi
+  printf -v "$__v" '%s' "$__in"
+}
+
+cat <<'BANNER'
+
+  ███████╗ █████╗ ██████╗ ███╗   ███╗████████╗ ██████╗ ██╗    ██╗███╗   ██╗
+  ██╔════╝██╔══██╗██╔══██╗████╗ ████║╚══██╔══╝██╔═══██╗██║    ██║████╗  ██║
+  █████╗  ███████║██████╔╝██╔████╔██║   ██║   ██║   ██║██║ █╗ ██║██╔██╗ ██║
+  ██╔══╝  ██╔══██║██╔══██╗██║╚██╔╝██║   ██║   ██║   ██║██║███╗██║██║╚██╗██║
+  ██║     ██║  ██║██║  ██║██║ ╚═╝ ██║   ██║   ╚██████╔╝╚███╔███╔╝██║ ╚████║
+  ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝   ╚═╝    ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═══╝
+            S E N T I N E L  —  headless 24/7 farming bot
+
+BANNER
+
+# ── 1. Prerequisites ───────────────────────────────────────────────────────
+say "${B}[1/6]${X} Checking prerequisites…"
+command -v git  >/dev/null 2>&1 || die "git is required. Install it first (e.g. 'apt install git')."
+command -v node >/dev/null 2>&1 || die "Node.js is required. Install Node 20+ (https://nodejs.org or nvm) then re-run."
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+[ "$NODE_MAJOR" -ge 20 ] || die "Node $NODE_MAJOR found, but Node 20+ is required. Upgrade Node and re-run."
+command -v npm  >/dev/null 2>&1 || die "npm is required (ships with Node)."
+ok "git $(git --version | awk '{print $3}'), node $(node -v), npm $(npm -v)"
+
+# ── 2. Get the code ────────────────────────────────────────────────────────
+say "${B}[2/6]${X} Fetching the bot into ${C}$DIR${X}…"
+if [ -d "$DIR/.git" ]; then
+  git -C "$DIR" pull --ff-only || warn "Could not fast-forward; keeping local copy."
+else
+  git clone --depth 1 "$REPO_URL" "$DIR"
+fi
+cd "$DIR"
+ok "Source ready."
+
+# ── 3. Dependencies ────────────────────────────────────────────────────────
+say "${B}[3/6]${X} Installing dependencies (npm)…"
+npm install --no-audit --no-fund --silent
+ok "Dependencies installed."
+
+# ── 4. Configure .env (interactive) ────────────────────────────────────────
+say "${B}[4/6]${X} Configuration — answers are written to a private .env (chmod 600)."
+if [ -f .env ]; then
+  ask OVR "  .env already exists. Overwrite it? [y/N] "
+  case "${OVR:-n}" in y|Y) : ;; *) warn "Keeping existing .env — skipping config."; SKIP_ENV=1 ;; esac
+fi
+
+if [ "${SKIP_ENV:-0}" != "1" ]; then
+  say ""
+  say "  ${Y}Use a BURNER Solana wallet, never your main one.${X}"
+  say "  ${C}Wallet secret key${X} — Phantom export (base58) OR a 64-byte JSON array."
+  ask SOLANA_SECRET_KEY "  → SOLANA_SECRET_KEY: " silent
+  [ -n "$SOLANA_SECRET_KEY" ] || die "SOLANA_SECRET_KEY is required."
+
+  say ""
+  say "  ${C}Supabase anon key${X} (FarmTown's public client key — needed to refresh login)."
+  say "  Get it: open the game ${B}→ F12 → Network ${X}→ click any request to ${B}*.supabase.co${X}"
+  say "  → Headers → copy the ${B}apikey${X} value (a long 'eyJ…' string)."
+  ask SUPABASE_ANON_KEY "  → SUPABASE_ANON_KEY: " silent
+  [ -n "$SUPABASE_ANON_KEY" ] || warn "Empty — token auto-refresh won't work until you set SUPABASE_ANON_KEY in .env."
+
+  say ""
+  say "  ${C}Telegram control${X} (recommended — lets you /status, /auth, /stop from your phone)."
+  say "  Create a bot with ${B}@BotFather${X} → copy its token. Get your chat id from ${B}@userinfobot${X}."
+  ask TELEGRAM_BOT_TOKEN "  → TELEGRAM_BOT_TOKEN (blank to skip): " silent
+  ask TELEGRAM_CHAT_ID   "  → TELEGRAM_CHAT_ID (blank to skip): "
+
+  say ""
+  ask DISPLAY_NAME    "  → In-game display name [ohmaygawd]: "
+  ask WITHDRAW_ADDRESS "  → Your MAIN wallet to withdraw \$FARM to (blank = disabled): "
+  ask ACTIVE_HOURS    "  → Active hours, anti-ban sleep window [06:00-23:30, or 24h]: "
+
+  umask 077
+  cat > .env <<ENV
+# === FarmTown Sentinel — generated by install.sh ($(date -u +%FT%TZ)) ===
+SOLANA_SECRET_KEY=$SOLANA_SECRET_KEY
+API_ORIGIN=https://play.farmtown.online
+REALTIME_URL=https://realtime.farmtown.online
+SUPABASE_URL=https://irarxwyrpmmxacrbvpnz.supabase.co
+SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
+DISPLAY_NAME=${DISPLAY_NAME:-ohmaygawd}
+ROOM_ID=farmtown-dev
+TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID
+ACTIVE_HOURS=${ACTIVE_HOURS:-06:00-23:30}
+SOLANA_RPC=https://api.mainnet-beta.solana.com
+WITHDRAW_ADDRESS=$WITHDRAW_ADDRESS
+ENV
+  chmod 600 .env
+  mkdir -p data && chmod 700 data
+  ok ".env written (permissions 600). Your secrets stay local — .env is git-ignored."
+fi
+
+# ── 5. Optional systemd service (24/7) ─────────────────────────────────────
+say "${B}[5/6]${X} 24/7 service (optional)."
+if command -v systemctl >/dev/null 2>&1 && [ "$(id -u)" = "0" ]; then
+  ask SVC "  Install + start a systemd service so it runs 24/7? [y/N] "
+  if [ "${SVC:-n}" = "y" ] || [ "${SVC:-n}" = "Y" ]; then
+    UNIT=/etc/systemd/system/farmtown-bot.service
+    cat > "$UNIT" <<UNITEOF
+[Unit]
+Description=FarmTown Sentinel Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$DIR
+ExecStart=$(command -v node) src/index.js
+Restart=always
+RestartSec=5
+StandardOutput=append:$DIR/data/service.log
+StandardError=append:$DIR/data/service.log
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+    systemctl daemon-reload
+    systemctl enable --now farmtown-bot.service
+    ok "Service installed & started. Logs: tail -f $DIR/data/service.log"
+    SERVICE_ON=1
+  fi
+else
+  warn "Skipping systemd (need root + systemctl). You can run it manually instead."
+fi
+
+# ── 6. Done — tutorial ─────────────────────────────────────────────────────
+say ""
+say "${B}[6/6]${X} ${G}Install complete!${X}"
+say ""
+say "${B}════════════════ HOW TO LOG IN (one-time, ~30 seconds) ════════════════${X}"
+say "FarmTown's signup is protected by Cloudflare Turnstile, so you log the bot in"
+say "by handing it a fresh browser session — then it auto-refreshes forever."
+say ""
+say "  ${C}1.${X} Open ${B}https://play.farmtown.online${X} in your browser and log in/connect wallet."
+say "  ${C}2.${X} Press ${B}F12 → Console${X} and run this (it copies your session to the clipboard):"
+say ""
+say "       ${Y}copy(localStorage.getItem(Object.keys(localStorage).find(k=>k.includes('auth-token'))))${X}"
+say ""
+say "  ${C}3.${X} Give it to the bot, either:"
+say "       • ${B}Telegram${X} (easiest):  send  ${B}/auth ${X} then paste  ${B}(Ctrl/Cmd+V)${X}"
+say "       • ${B}Manually${X}:  paste it into  ${B}$DIR/data/session.json${X}"
+say ""
+if [ "${SERVICE_ON:-0}" = "1" ]; then
+  say "The service is already running and will pick up the session the moment you /auth."
+else
+  say "Then start the bot:   ${B}cd $DIR && npm run bot${X}"
+fi
+say ""
+say "Useful Telegram commands: ${B}/status /balance /pool /orders /auth /stop /start /help${X}"
+say "Full guide: ${C}$DIR/README.md${X}"
+say "${B}═══════════════════════════════════════════════════════════════════════${X}"

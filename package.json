@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Headless automation for play.farmtown.online (socket.io + Solana wallet auth)",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/rygroup-dev/farmtown-bot.git" },
+  "engines": { "node": ">=20" },
   "scripts": {
     "bot": "node src/index.js",
     "test": "node --test",

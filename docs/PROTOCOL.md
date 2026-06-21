@@ -1,6 +1,6 @@
 # FarmTown Protocol Reference (reverse-engineered)
 
-Source: 137MB HAR + live testing, 2026-06-20. Account wallet = `.env` (`di3eko…`).
+Source: 137MB HAR + live testing, 2026-06-20. Account wallet = `.env` (`<your-burner-wallet>`).
 
 ## Auth (3 stages)
 1. **Supabase anon session** (browser, Turnstile-gated): gives `access_token` (ES256 JWT, ~1h) + `refresh_token`. Refresh without captcha: `POST {SUPABASE_URL}/auth/v1/token?grant_type=refresh_token` with header `apikey: <anon key>`, body `{refresh_token}`.

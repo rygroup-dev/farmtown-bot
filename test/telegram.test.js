@@ -32,7 +32,7 @@ function mockCtx() {
   const ctx = {
     state,
     flags: { running: true, paused: false, autopilot: true, connected: true, forceCrop: null, objective: 'balanced' },
-    walletAddress: 'di3ekoVELU2R9gw1GoVdAzjcMGDv76iMARGF19YXNTq',
+    walletAddress: 'So11111111111111111111111111111111111111112',
     economy: loadEconomy(),
     stats: () => 'up 5m • harvests 3 • plants 2 <ok>',
     tailLog: (n) => `[INFO] line with <html> & special chars\nattempt ${n}`,
@@ -44,7 +44,7 @@ function mockCtx() {
     claimPool: async () => ({ ok: true, contributed: true }),
     manual: (kind, arg) => calls.manual.push([kind, arg]),
     setConfig: (k, v) => { calls.config.push([k, v]); return `${k} = ${v}`; },
-    walletInfo: async () => ({ address: 'di3ekoVELU2R9gw1GoVdAzjcMGDv76iMARGF19YXNTq', sol: 0.12, farm: 4321 }),
+    walletInfo: async () => ({ address: 'So11111111111111111111111111111111111111112', sol: 0.12, farm: 4321 }),
     withdraw: async () => ({ ok: true, amount: 4321, sig: 'sig123' }),
     withdrawAddress: 'MainWa11etAddressHere11111111111111111111111',
     starBundles: async () => ([{ displayName: 'Starter', totalStars: 3, targetUsdValue: 5 }]),
