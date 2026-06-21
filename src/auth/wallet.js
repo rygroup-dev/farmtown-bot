@@ -7,11 +7,16 @@ export function signMessage(message) {
   return bs58.encode(sig);
 }
 export async function bindWallet(rest) {
-  const ch = await rest.req('/api/auth/wallet/challenge', { method: 'POST', body: { walletAddress } });
+  // A wallet challenge is SINGLE-USE: never let rest.req auto-retry these POSTs.
+  // If verify's response times out the server may have already consumed the
+  // challenge — retrying would hit CHALLENGE_ALREADY_USED. Instead the caller
+  // retries the WHOLE bindWallet (fresh challenge each time). retries:0 + longer
+  // timeout because the API can be slow right after maintenance.
+  const ch = await rest.req('/api/auth/wallet/challenge', { method: 'POST', body: { walletAddress }, retries: 0, timeoutMs: 25000 });
   if (ch.status !== 200 || !ch.json?.message) throw new Error('challenge failed: ' + ch.status);
   const { challengeId, nonce, message } = ch.json;
   const signature = signMessage(message);
-  const vr = await rest.req('/api/auth/wallet/verify', { method: 'POST',
+  const vr = await rest.req('/api/auth/wallet/verify', { method: 'POST', retries: 0, timeoutMs: 25000,
     body: { challengeId, nonce, walletAddress, message, signature } });
   if (vr.status !== 200 || !vr.json?.gameplayAllowed) throw new Error('verify failed: ' + JSON.stringify(vr.json).slice(0, 200));
   return vr.json;
