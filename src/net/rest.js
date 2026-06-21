@@ -15,12 +15,14 @@ export class Rest {
     if (this.walletSession) h['x-farmtown-wallet-session'] = this.walletSession;
     return h;
   }
-  async req(path, { method = 'GET', body, base, retries = 2, apikey } = {}) {
+  async req(path, { method = 'GET', body, base, retries = 2, apikey, timeoutMs = 15000 } = {}) {
     const url = (base || this.origin) + path;
     const extra = apikey ? { apikey } : {};
     for (let i = 0; i <= retries; i++) {
       try {
-        const r = await fetch(url, { method, headers: this.headers(extra), body: body ? JSON.stringify(body) : undefined });
+        // AbortSignal.timeout prevents a hung connection (flaky server / maintenance)
+        // from blocking the bot forever — the fetch rejects and we retry/back off.
+        const r = await fetch(url, { method, headers: this.headers(extra), body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(timeoutMs) });
         const setC = r.headers.get('set-cookie'); if (setC) this.cookie = mergeCookie(this.cookie, setC);
         const text = await r.text(); let json; try { json = JSON.parse(text); } catch { json = text; }
         if (r.status >= 500 && i < retries) { await new Promise(s => setTimeout(s, 500 * (i + 1))); continue; }

@@ -24,14 +24,30 @@ export async function runAccount() {
 
   let session = loadSession();
   if (!session) session = await bootstrapSession();
-  if (supabaseExpiringSoon(session)) await refreshSupabase(session, rest);
-  if (session.cookieHeader) rest.setCookie(session.cookieHeader);
-  rest.setBearer(session.access_token);
-  const verified = await bindWallet(rest);
-  session.walletSessionToken = verified.walletSessionToken;
-  rest.setWalletSession(session.walletSessionToken); // x-farmtown-wallet-session header for /api/auth/session keepalive
-  session.persistentPlayerId = walletSessionPlayerId(session.walletSessionToken) || session.persistentPlayerId || crypto.randomUUID();
-  saveSession(session);
+
+  // Initial auth, retried — the server is sometimes in maintenance / flaky on boot
+  // and bind can 401/time-out. Retry with backoff instead of crashing the process.
+  async function authenticate() {
+    if (supabaseExpiringSoon(session)) await refreshSupabase(session, rest);
+    if (session.cookieHeader) rest.setCookie(session.cookieHeader);
+    rest.setBearer(session.access_token);
+    const v = await bindWallet(rest);
+    session.walletSessionToken = v.walletSessionToken;
+    rest.setWalletSession(session.walletSessionToken); // x-farmtown-wallet-session header
+    session.persistentPlayerId = walletSessionPlayerId(session.walletSessionToken) || session.persistentPlayerId || crypto.randomUUID();
+    saveSession(session);
+    return v;
+  }
+  let verified, authAttempt = 0;
+  while (flags.running) {
+    try { verified = await authenticate(); break; }
+    catch (e) {
+      authAttempt++;
+      const wait = Math.min(5000 * authAttempt, 60000);
+      log.warn('AUTH', `failed (${e.message}) — retry in ${Math.round(wait / 1000)}s (attempt ${authAttempt})`);
+      await sleep(wait);
+    }
+  }
   log.info('AUTH', `gameplayAllowed wallet=${verified.walletAddress} player=${session.persistentPlayerId}`);
 
   const tg = startTelegram({
