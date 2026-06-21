@@ -5,7 +5,8 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
   for (const t of state.readyToHarvest())
     plan.push({ kind:'harvest', event:'crop:harvest/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'harvest', tool:'hoe' } });
   for (const t of state.blocked())
-    plan.push({ kind:'clear', event:'tile:clear/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'clear', tool:'axe' } });
+    // Rocks/stone need the Pickaxe; trees/bushes/weeds/sticks use the Axe.
+    plan.push({ kind:'clear', event:'tile:clear/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'clear', tool: (t.blocker === 'stone' || t.blocker === 'rock') ? 'pickaxe' : 'axe' } });
   for (const t of state.hoeable())
     plan.push({ kind:'hoe', event:'tile:hoe/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'hoe', tool:'hoe' } });
 
