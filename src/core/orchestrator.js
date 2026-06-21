@@ -139,10 +139,13 @@ export async function runAccount() {
       if (!queuedNotified) { queuedNotified = true; tg.notify(`⏳ in queue — position ${d.position}, joining automatically`); }
     });
     gs.on('joined', () => {
+      const firstJoin = !flags.connected; // the server can emit 'joined' twice — dedupe the notification
       flags.connected = true; reconnecting = false; reconnectAttempt = 0; lastActionAt = Date.now(); gs.refreshSnapshot();
       log.info('JOINED', 'farm gold=' + state.gold + ' level=' + state.level + ' owned=' + state.ownedTiles().length);
+      if (!firstJoin) return;
       // If we were in a sustained outage, announce RECOVERY clearly (once). Otherwise a normal join.
-      if (degraded) { degraded = false; tg.notify('✅ <b>SERVER RECOVERED</b> — farming resumed.\nLevel ' + state.level + ' • gold ' + state.gold); }
+      // Either way the user ALWAYS gets a "server is up / I'm back in" ping on every (re)join.
+      if (degraded) { degraded = false; tg.notify('✅ <b>SERVER BACK UP</b> — auto-rejoined, farming resumed.\nLevel ' + state.level + ' • gold ' + state.gold); }
       else tg.notify('🟢 joined farm — level ' + state.level + ' gold ' + state.gold);
     });
     gs.on('down', (reason) => { flags.connected = false; scheduleReconnect(reason); });
