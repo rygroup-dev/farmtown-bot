@@ -69,6 +69,9 @@ export class ActionRunner {
         tileY: payload.tileY,
       });
       full.action = meta.action;
+      // top-level selectedTool/selectedSeedId added by the 2026-06 game update
+      full.selectedTool = meta.tool;
+      full.selectedSeedId = meta.seedId || 'none';
     }
     const result = await this._emitAndAwait(event, full, id);
     if (result === 'backpressure' && attempt < 4) {
