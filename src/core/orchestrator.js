@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { config } from '../config.js';
+import fs from 'node:fs';
+import { config, walletAddress } from '../config.js';
 import { log } from '../logger.js';
 import { Rest } from '../net/rest.js';
 import { loadSession, saveSession, refreshSupabase, supabaseExpiringSoon, keepWalletSessionAlive } from '../auth/session.js';
@@ -10,7 +11,7 @@ import { GameState } from '../game/state.js';
 import { ActionRunner } from '../game/actions.js';
 import { planActions, planClaims, planStorage } from '../game/brain.js';
 import { loadEconomy } from '../game/economy.js';
-import { maybeContribute } from '../game/farmerpool.js';
+import { maybeContribute, pollFarmerPool } from '../game/farmerpool.js';
 import { withinActiveHours, secondsUntilInactive, sleep, gaussianDelay, maybeBreak } from '../safety/humanizer.js';
 import { startTelegram } from '../telegram/bot.js';
 
@@ -18,7 +19,8 @@ export async function runAccount() {
   const rest = new Rest();
   const eco = loadEconomy();
   const state = new GameState();
-  const flags = { running: true, paused: false, autopilot: true, connected: false, forceCrop: null };
+  const flags = { running: true, paused: false, autopilot: true, connected: false, forceCrop: null, objective: 'balanced' };
+  const settings = { activeHours: config.activeHours, goldReserve: 150, poolBurnGold: config.pool.burnGold };
   const stats = { started: Date.now(), harvests: 0, plants: 0, goldStart: 0 };
   const manualQueue = [];
 
@@ -51,10 +53,25 @@ export async function runAccount() {
   log.info('AUTH', `gameplayAllowed wallet=${verified.walletAddress} player=${session.persistentPlayerId}`);
 
   const tg = startTelegram({
-    state, flags,
-    stats: () => `⏱️ up ${Math.round((Date.now() - stats.started) / 60000)}m • harvests ${stats.harvests} • plants ${stats.plants} • gold ${state.gold}`,
-    tailLog: () => 'see data/bot.log',
+    state, flags, walletAddress, economy: eco,
+    stats: () => {
+      const upMin = Math.round((Date.now() - stats.started) / 60000);
+      const goldGain = state.gold - (stats.goldStart || state.gold);
+      const perHr = upMin > 0 ? Math.round(goldGain / (upMin / 60)) : 0;
+      return `⏱️ up ${upMin}m • harvests ${stats.harvests} • plants ${stats.plants} • gold +${goldGain} (~${perHr}/hr) • orders done ${state.completedOrdersCount} • jobs ${state.completedFarmJobsCount} • harvested ${state.totalHarvestedCrops}`;
+    },
+    tailLog: (n = 20) => { try { return fs.readFileSync('data/bot.log', 'utf8').trim().split('\n').slice(-n).join('\n'); } catch { return '(no log yet)'; } },
+    pool: () => pollFarmerPool(rest),
+    claimPool: () => maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve }),
     manual: (kind, arg) => manualQueue.push({ kind, arg }),
+    setConfig: (key, val) => {
+      if (key === 'activeHours') settings.activeHours = val;
+      else if (key === 'goldReserve') settings.goldReserve = Number(val) || settings.goldReserve;
+      else if (key === 'poolBurnGold') settings.poolBurnGold = !!val;
+      else if (key === 'objective') flags.objective = ['gold', 'xp', 'balanced'].includes(val) ? val : flags.objective;
+      else if (key === 'forceCrop') flags.forceCrop = (val === 'auto' || val === 'off' || !val) ? null : val;
+      return `${key} = ${val}`;
+    },
   });
 
   // Re-auth so every (re)connect uses fresh tokens (supabase ~1h, walletSession ~30m).
@@ -136,20 +153,21 @@ export async function runAccount() {
     while (flags.running) {
       await sleep(gaussianDelay(540000, 660000)); // ~10 min
       if (!config.pool.enabled || !flags.connected || state.level < 10) continue;
-      const r = await maybeContribute(rest, { burnGold: config.pool.burnGold, goldReserve: config.pool.goldReserve });
+      const r = await maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve });
       if (r?.contributed) tg.notify(`💎 Farmer's Pool: contributed claim power — earning $FARM`);
     }
   })();
 
   while (flags.running) {
     try {
-      const active = withinActiveHours(config.activeHours);
+      const active = withinActiveHours(settings.activeHours);
       if (flags.connected && !flags.paused && flags.autopilot && active) {
-        while (manualQueue.length) { const m = manualQueue.shift(); await handleManual(m, { state, runner, flags }); }
-        const timeBudgetSeconds = secondsUntilInactive(config.activeHours);
+        while (manualQueue.length) { const m = manualQueue.shift(); await handleManual(m, { state, runner, flags, gs, settings, reconnect: () => scheduleReconnect('manual') }); }
+        const timeBudgetSeconds = secondsUntilInactive(settings.activeHours);
+        const ecoForPlant = flags.forceCrop && eco[flags.forceCrop] ? { [flags.forceCrop]: eco[flags.forceCrop] } : eco;
         const plan = [
           ...planClaims(state),
-          ...planActions(state, eco, { objective: flags.forceCrop ? 'gold' : 'balanced', timeBudgetSeconds }),
+          ...planActions(state, ecoForPlant, { objective: flags.objective, timeBudgetSeconds, goldReserve: settings.goldReserve }),
           ...planStorage(state),
         ];
         if (plan.length) {
@@ -178,10 +196,31 @@ export async function runAccount() {
   }
 }
 
-async function handleManual(m, { state, runner, flags }) {
-  if (m.kind === 'restart') { log.info('MANUAL', 'restart requested'); process.exit(0); }
+const STORAGE_TIERS = [
+  { itemId: 'small_storage_crate', cap: 75, cost: 25000 },
+  { itemId: 'big_storage_crate', cap: 125, cost: 100000 },
+  { itemId: 'farm_storage_chest', cap: 200, cost: 500000 },
+];
+
+async function handleManual(m, { state, runner, flags, gs, settings, reconnect }) {
+  log.info('MANUAL', m.kind + (m.arg ? ' ' + m.arg : ''));
+  if (m.kind === 'restart') { process.exit(0); }
+  if (m.kind === 'reconnect') { if (reconnect) reconnect(); return; }
   if (m.kind === 'harvest') for (const t of state.readyToHarvest()) await runner.do('crop:harvest/request', { tileX: t.x, tileY: t.y }, { action: 'harvest', tool: 'hoe' });
-  if (m.kind === 'plant' && m.arg) for (const t of state.tilledEmpty()) await runner.do('crop:plant/request', { tileX: t.x, tileY: t.y, seedId: `${m.arg}_seed` }, { action: 'plant', tool: 'seed_bag', seedId: `${m.arg}_seed` });
-  if (m.kind === 'buyplot') { const b = state.buyableTiles()[0]; if (b) await runner.do('plot:buy/request', { tileX: b.x, tileY: b.y }, null); }
-  if (m.kind === 'sellall') log.info('MANUAL', 'sellall is a no-op — gold comes from completing orders (auto)');
+  if ((m.kind === 'plant' || m.kind === 'plantall') && m.arg) {
+    const seedId = m.arg.endsWith('_seed') ? m.arg : `${m.arg}_seed`;
+    const tiles = m.kind === 'plantall' ? state.tilledEmpty() : state.tilledEmpty().slice(0, 1);
+    for (const t of tiles) await runner.do('crop:plant/request', { tileX: t.x, tileY: t.y, seedId }, { action: 'plant', tool: 'seed_bag', seedId });
+  }
+  if (m.kind === 'buyplot') { const b = state.buyableTiles().find(t => t.ownerState === 'buyable') || state.buyableTiles()[0]; if (b) await runner.do('plot:buy/request', { tileX: b.x, tileY: b.y }, null); }
+  if (m.kind === 'buyseed' && m.arg) {
+    const [crop, qtyStr] = m.arg.split(/\s+/);
+    const seedId = crop.endsWith('_seed') ? crop : `${crop}_seed`;
+    const quantity = Math.max(1, Number(qtyStr) || 1);
+    await runner.do('store:buySeed/request', { seedId, quantity }, null);
+  }
+  if (m.kind === 'upgradestorage') {
+    const tier = STORAGE_TIERS.find(t => t.cap > state.inventoryCapacity);
+    if (tier && state.gold >= tier.cost) await runner.do('store:buyItem/request', { itemId: tier.itemId }, null);
+  }
 }

@@ -6,6 +6,9 @@ export class GameState {
     this.cropInventory = {}; this.orders = []; this.farmJobs = [];
     this.starterTasks = { currentTaskId: null, completed: [] };
     this.selectedTool = null; this.selectedSeedId = null;
+    this.cropMastery = {}; this.questChapters = null;
+    this.farmValue = 0; this.farmRank = 0; this.farmPoints = 0;
+    this.completedOrdersCount = 0; this.completedFarmJobsCount = 0; this.totalHarvestedCrops = 0;
   }
   key(x, y) { return `${x},${y}`; }
   apply(event, data) {
@@ -29,6 +32,14 @@ export class GameState {
         if (f.starterTasks) this.starterTasks = f.starterTasks;
         if (f.selectedTool != null) this.selectedTool = f.selectedTool;
         if (f.selectedSeedId != null) this.selectedSeedId = f.selectedSeedId;
+        if (f.cropMastery) this.cropMastery = f.cropMastery;
+        if (f.questChapters) this.questChapters = f.questChapters;
+        if (f.farmValue != null) this.farmValue = f.farmValue;
+        if (f.farmRank != null) this.farmRank = f.farmRank;
+        if (f.farmPoints != null) this.farmPoints = f.farmPoints;
+        if (f.completedOrdersCount != null) this.completedOrdersCount = f.completedOrdersCount;
+        if (f.completedFarmJobsCount != null) this.completedFarmJobsCount = f.completedFarmJobsCount;
+        if (f.totalHarvestedCrops != null) this.totalHarvestedCrops = f.totalHarvestedCrops;
         break;
       }
       case 'tile:update': {
