@@ -33,7 +33,7 @@ export async function pollFarmerPool(rest) {
 //   2) Burn only in WHOLE-power multiples (exactly like the game UI's power sliders) so
 //      no farm points or gold are ever wasted on sub-power rounding; the remainder
 //      (<1 power) is kept and accumulates for the next contribution.
-export function decideContribution(status, { burnGold = false, goldReserve = 100000, burnLevels = false } = {}) {
+export function decideContribution(status, { burnGold = false, goldReserve = 100000, burnLevels = false, levelFloor = 10, sacrificeAt = 0, currentLevel = null } = {}) {
   const cfg = status?.config, pool = status?.pool, player = status?.player;
   if (!cfg?.enabled) return null;
   if (!pool || pool.status !== 'active') return null;
@@ -49,7 +49,18 @@ export function decideContribution(status, { burnGold = false, goldReserve = 100
 
   const farmPointsToBurn = floorTo(player.availableFarmPoints || 0, fpPer);
   const goldToBurn = burnGold ? floorTo(Math.max(0, (player.gold || 0) - goldReserve), goldPer) : 0;
-  const levelsToBurn = burnLevels ? Math.max(0, player.burnableLevels || 0) : 0;
+
+  // Level SACRIFICE (opt-in): convert otherwise-wasted post-cap XP into claim power.
+  // Hard guardrails — never burn below `levelFloor`, never more than the server allows
+  // (burnableLevels), and only once an account has reached `sacrificeAt` (e.g. max L30).
+  // Prefer the live `currentLevel` over the pool's sometimes-stale cached player.level.
+  let levelsToBurn = 0;
+  if (burnLevels) {
+    const lvl = currentLevel ?? player.level ?? 0;
+    if (!sacrificeAt || lvl >= sacrificeAt) {
+      levelsToBurn = Math.max(0, Math.min(player.burnableLevels || 0, lvl - levelFloor));
+    }
+  }
 
   if (farmPointsToBurn + goldToBurn + levelsToBurn <= 0) return null; // nothing worth a whole power yet
   return { farmPointsToBurn, goldToBurn, levelsToBurn };

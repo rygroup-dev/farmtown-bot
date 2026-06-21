@@ -65,3 +65,27 @@ test('skips when pool not active', () => {
 test('skips when nothing reaches a whole power', () => {
   assert.strictEqual(decideContribution({ ...base, player: { ...base.player, availableFarmPoints: 0 } }), null);
 });
+
+test('level-sacrifice: burns down to floor only once at sacrificeAt, capped by burnableLevels', () => {
+  const p = (lvl, burnable) => ({ ...base, player: { ...base.player, level: lvl, burnableLevels: burnable, availableFarmPoints: 0 } });
+  // L30, floor 13 → 17 levels; live currentLevel overrides
+  let c = decideContribution(p(30, 20), { burnLevels: true, levelFloor: 13, sacrificeAt: 30, currentLevel: 30 });
+  assert.strictEqual(c.levelsToBurn, 17);
+  // not yet at sacrificeAt (L25) → 0
+  c = decideContribution(p(25, 15), { burnLevels: true, levelFloor: 13, sacrificeAt: 30, currentLevel: 25 });
+  assert.strictEqual(c, null); // nothing else to burn either → null
+  // capped by server burnableLevels (only 10 allowed) even though 30-13=17
+  c = decideContribution(p(30, 10), { burnLevels: true, levelFloor: 13, sacrificeAt: 30, currentLevel: 30 });
+  assert.strictEqual(c.levelsToBurn, 10);
+});
+
+test('level-sacrifice uses live currentLevel over stale pool cache, never below floor', () => {
+  const stale = { ...base, player: { ...base.player, level: 2, burnableLevels: 20, availableFarmPoints: 0 } };
+  const c = decideContribution(stale, { burnLevels: true, levelFloor: 13, sacrificeAt: 30, currentLevel: 30 });
+  assert.strictEqual(c.levelsToBurn, 17); // floor 13 respected: 30-13
+});
+
+test('level-sacrifice off by default (no accidental burns)', () => {
+  const c = decideContribution({ ...base, player: { ...base.player, level: 30, burnableLevels: 20 } }, { currentLevel: 30 });
+  assert.strictEqual(c.levelsToBurn, 0);
+});

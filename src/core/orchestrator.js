@@ -82,7 +82,7 @@ export async function runAccount(account = {}) {
     },
     tailLog: (n = 20) => { try { return fs.readFileSync('data/bot.log', 'utf8').trim().split('\n').slice(-n).join('\n'); } catch { return '(no log yet)'; } },
     pool: () => pollFarmerPool(rest),
-    claimPool: () => maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve }),
+    claimPool: () => maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level }),
     walletInfo: () => getWalletInfo(),
     withdraw: () => withdrawFarm(config.withdrawAddress),
     withdrawAddress: config.withdrawAddress,
@@ -339,7 +339,7 @@ export async function runAccount(account = {}) {
     while (flags.running) {
       await sleep(gaussianDelay(540000, 660000)); // ~10 min
       if (!config.pool.enabled || !flags.connected || state.level < 10) continue;
-      const r = await maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve });
+      const r = await maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level });
       if (r?.contributed) {
         const now = Date.now();
         if (!poolNotified) { poolNotified = true; poolLastSummary = now; tg.notify("💎 Farmer's Pool is open — auto-contributing free farm points to earn $FARM. /pool for details."); }

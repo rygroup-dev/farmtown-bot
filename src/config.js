@@ -26,6 +26,9 @@ export const config = {
     enabled: process.env.FARMER_POOL !== 'off',
     burnGold: process.env.POOL_BURN_GOLD === 'on', // default: keep gold for farming
     goldReserve: Number(process.env.POOL_GOLD_RESERVE || 100000),
+    burnLevels: process.env.POOL_BURN_LEVELS === 'on', // sacrifice levels into the pool
+    levelFloor: Number(process.env.POOL_LEVEL_FLOOR || 10), // never sacrifice below this
+    sacrificeAt: Number(process.env.POOL_SACRIFICE_AT || 0), // only sacrifice once at/above this level (0 = always)
   },
   sessionFile: 'data/session.json',
   multiAccount: process.env.MULTI_ACCOUNT === 'on',
