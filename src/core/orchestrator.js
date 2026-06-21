@@ -283,9 +283,14 @@ export async function runAccount(account = {}) {
       tg.notify('⚠️ MULTI_ACCOUNT is on but CAPTCHA_API_KEY is unset — sub-accounts each need their own session. Set CAPTCHA_API_KEY to auto-mint them.');
     }
     log.info('MULTI', `spawning ${subs.length} sub-account engine(s)`);
+    // Sub-accounts farm SILENTLY — a single Telegram bot shared by 31 engines would spam
+    // 31× on every pool-open / join / reconnect. Only the main account notifies; the whole
+    // fleet (live level/gold/connected per account) is monitored via /accounts. Sub issues
+    // still hit the log (/log).
+    const silentTg = { notify() {} };
     for (const w of subs) {
       const subLabel = `sub${w.index}`;
-      runAccount({ keypair: parseSecret(w.secretKey), label: subLabel, isMain: false, sharedTg: tg, registry: reg, sessionStore: subSessionStore(subLabel), eco })
+      runAccount({ keypair: parseSecret(w.secretKey), label: subLabel, isMain: false, sharedTg: silentTg, registry: reg, sessionStore: subSessionStore(subLabel), eco })
         .catch((e) => log.error('MULTI', `${subLabel} crashed: ${e.message}`));
       await sleep(gaussianDelay(8000, 15000)); // stagger starts (captcha solves + anti-thundering-herd)
     }
