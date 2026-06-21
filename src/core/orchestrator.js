@@ -277,7 +277,8 @@ export async function runAccount(account = {}) {
   // generated sub-wallet, each under its OWN auto-minted Supabase session (captcha). They
   // share this Telegram bot + registry and sweep their $FARM to main. Gated by MULTI_ACCOUNT.
   if (isMain && config.multiAccount) {
-    const subs = loadSubWallets();
+    let subs = loadSubWallets();
+    if (config.multiAccountLimit > 0) subs = subs.slice(0, config.multiAccountLimit); // staged rollout
     if (subs.length && !captchaEnabled()) {
       tg.notify('⚠️ MULTI_ACCOUNT is on but CAPTCHA_API_KEY is unset — sub-accounts each need their own session. Set CAPTCHA_API_KEY to auto-mint them.');
     }

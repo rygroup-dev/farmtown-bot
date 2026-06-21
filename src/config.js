@@ -29,5 +29,6 @@ export const config = {
   },
   sessionFile: 'data/session.json',
   multiAccount: process.env.MULTI_ACCOUNT === 'on',
+  multiAccountLimit: Number(process.env.MULTI_ACCOUNT_LIMIT || 0), // 0 = run all generated subs
 };
 export const walletAddress = config.keypair.publicKey.toBase58();
