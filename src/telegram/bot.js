@@ -83,9 +83,9 @@ export async function dispatchCommand(text, ctx, send) {
         );
       case '/farm': {
         const owned = s.ownedTiles().length, grass = s.grassEmpty().length, tilled = s.tilledEmpty().length;
-        const ready = s.readyToHarvest().length, blocked = s.blocked().length;
-        const planted = Math.max(0, owned - grass - tilled - ready - blocked);
-        return send(`🌾 <b>Farm</b>\n🏡 Owned: ${owned}\n🟩 Grass: ${grass}\n🟫 Tilled: ${tilled}\n🌱 Growing: ${planted}\n✅ Ready: ${ready}\n🚫 Blocked: ${blocked}`);
+        const ready = s.readyToHarvest().length, blocked = s.blocked().length, dead = s.deadCrops().length;
+        const planted = Math.max(0, owned - grass - tilled - ready - blocked - dead);
+        return send(`🌾 <b>Farm</b>\n🏡 Owned: ${owned}\n🟩 Grass: ${grass}\n🟫 Tilled: ${tilled}\n🌱 Growing: ${planted}\n✅ Ready: ${ready}\n💀 Dead: ${dead}\n🚫 Blocked: ${blocked}`);
       }
       case '/inventory':
       case '/seeds': {

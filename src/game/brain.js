@@ -7,6 +7,9 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
   const plan = [];
   for (const t of state.readyToHarvest())
     plan.push({ kind:'harvest', event:'crop:harvest/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'harvest', tool:'hoe' } });
+  // Clear dead crops so the tile re-enters the cycle (dead → cleared → hoe → plant).
+  for (const t of state.deadCrops())
+    plan.push({ kind:'clearDead', event:'crop:clearDead/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'clearDead', tool:'hoe' } });
   for (const t of state.blocked())
     // Rocks/stone need the Pickaxe; trees/bushes/weeds/sticks use the Axe.
     plan.push({ kind:'clear', event:'tile:clear/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'clear', tool: (t.blocker === 'stone' || t.blocker === 'rock') ? 'pickaxe' : 'axe' } });
@@ -71,7 +74,7 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
   const expandable = state.expandableTiles();
   const ownedCount = state.ownedTiles().length;
   const expandReserve = Math.max(goldReserve, ownedCount * 250);
-  const unworked = state.blocked().length + state.hoeable().length + state.tilledEmpty().length;
+  const unworked = state.blocked().length + state.hoeable().length + state.tilledEmpty().length + state.deadCrops().length;
   if (expandable.length && state.gold >= expandReserve && unworked < 4) {
     const t = expandable[0];
     plan.push({ kind:'buyPlot', event:'plot:buy/request', payload:{ tileX:t.x, tileY:t.y }, meta:null });

@@ -66,7 +66,24 @@ export class GameState {
   blocked() { return this.ownedTiles().filter(t => t.blocker && t.blocker !== 'none'); }
   // Ready to harvest, with a 1.5s buffer so we never fire before the SERVER agrees
   // (avoids "Nothing ready" races), and excluding crops that have already died.
-  readyToHarvest() { const now = Date.now(); return this.ownedTiles().filter(t => t.cropId && t.readyAt && t.readyAt <= now - 3000 && (!t.diesAt || t.diesAt > now)); }
+  // Harvest whatever the SERVER says is ripe (groundState 'ready') — even if its diesAt
+  // has passed: while the tile is still 'ready' the crop is harvestable, the server just
+  // hasn't reaped it. (The old diesAt>now guard made the bot REFUSE overdue-but-ready
+  // crops, leaving 50 tiles stuck + idle after a long disconnect.) The timing branch is
+  // a fallback (with a 3s buffer to dodge "Nothing ready" races) for snapshots that
+  // carry readyAt but not yet groundState 'ready'. Truly dead crops are groundState
+  // 'dead' → handled by deadCrops()/clearDead, not here.
+  readyToHarvest() {
+    const now = Date.now();
+    return this.ownedTiles().filter(t => t.cropId && (
+      t.groundState === 'ready' ||
+      (t.readyAt && t.readyAt <= now - 3000 && (!t.diesAt || t.diesAt > now))
+    ));
+  }
+  // Crops the server has marked DEAD (groundState 'dead') — ripened past their death
+  // window, typically while we were disconnected. They block the tile (can't harvest,
+  // can't replant) until removed with crop:clearDead, so the brain must clear them.
+  deadCrops() { return this.ownedTiles().filter(t => t.groundState === 'dead'); }
   buyableTiles() { return [...this.tiles.values()].filter(t => t.ownerState === 'buyable' || t.ownerState === 'locked'); }
   // Locked tiles orthogonally adjacent to owned land — the only plots you can buy
   // ("Locked tiles must be adjacent to your owned area"). Server validates the price.

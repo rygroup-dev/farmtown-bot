@@ -105,3 +105,28 @@ test('does not expand while there is an unworked backlog (>=4)', () => {
   s.tiles.set('0,1', { x:0, y:1, ownerState:'locked' });
   assert.equal(planActions(s, eco, { goldReserve: 2000, maxPlantsPerTick: 0 }).some(a => a.kind === 'buyPlot'), false);
 });
+
+test('clears DEAD crops (groundState dead) before planting — unsticks the farm', () => {
+  const s = new GameState();
+  s.gold = 10000; s.inventory = {};
+  // 2 dead-crop tiles (stuck) + 1 tilled-empty
+  s.tiles.set('1,0', { x:1, y:0, ownerState:'owned', groundState:'dead', blocker:'none', cropId:'carrot' });
+  s.tiles.set('2,0', { x:2, y:0, ownerState:'owned', groundState:'dead', blocker:'none', cropId:'corn' });
+  s.tiles.set('3,0', { x:3, y:0, ownerState:'owned', groundState:'tilled', blocker:'none', cropId:null });
+  assert.equal(s.deadCrops().length, 2);
+  const plan = planActions(s, eco, { objective:'gold' });
+  const clears = plan.filter(a => a.kind === 'clearDead');
+  assert.equal(clears.length, 2, 'emits a clearDead for each dead tile');
+  assert.equal(clears[0].event, 'crop:clearDead/request');
+  assert.deepEqual(clears[0].payload, { tileX:1, tileY:0 });
+  // dead tiles are NOT replanted until cleared (only the tilled tile gets a plant)
+  assert.equal(plan.filter(a => a.kind === 'plant').length, 1);
+});
+
+test('does not expand while dead crops form a backlog', () => {
+  const s = new GameState();
+  s.gold = 1000000;
+  for (let i = 0; i < 4; i++) s.tiles.set(`${i},0`, { x:i, y:0, ownerState:'owned', groundState:'dead', blocker:'none', cropId:'carrot' });
+  s.tiles.set('0,1', { x:0, y:1, ownerState:'locked' });
+  assert.equal(planActions(s, eco, { goldReserve: 2000 }).some(a => a.kind === 'buyPlot'), false);
+});

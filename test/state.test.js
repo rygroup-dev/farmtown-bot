@@ -83,3 +83,17 @@ test('expandableTiles returns only locked tiles adjacent to owned', () => {
   const e = s.expandableTiles().map(t => `${t.x},${t.y}`).sort();
   assert.deepStrictEqual(e, ['5,6', '6,5']);
 });
+
+test('readyToHarvest harvests overdue-but-ready crops (server groundState=ready, diesAt passed)', () => {
+  const s = new GameState();
+  const now = Date.now();
+  // ripe per server (groundState 'ready') but diesAt already passed → must STILL harvest
+  s.tiles.set('1,0', { x:1,y:0, ownerState:'owned', groundState:'ready', cropId:'carrot', readyAt: now-60000, diesAt: now-1000 });
+  // genuinely dead → NOT harvested (handled by clearDead)
+  s.tiles.set('2,0', { x:2,y:0, ownerState:'owned', groundState:'dead', cropId:'corn', readyAt: now-60000, diesAt: now-1000 });
+  // timing-ripe fallback (planted, readyAt passed, not dead)
+  s.tiles.set('3,0', { x:3,y:0, ownerState:'owned', groundState:'planted', cropId:'wheat', readyAt: now-5000 });
+  const ready = s.readyToHarvest().map(t => t.cropId).sort();
+  assert.deepStrictEqual(ready, ['carrot', 'wheat']);
+  assert.strictEqual(s.deadCrops().length, 1);
+});

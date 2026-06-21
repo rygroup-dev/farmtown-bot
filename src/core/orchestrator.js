@@ -130,7 +130,7 @@ export async function runAccount() {
       if (ev === 'game:actionResult' && data.ok) log.info('ACT', (data.type || '?') + ' ok' + (data.message ? (' — ' + data.message) : ''));
       if (ev === 'game:error' || ev === 'farm:error') log.warn('GAMEERR', (data.code || '?') + ' ' + (data.message || ''));
       if (ev === 'game:actionResult' && data.ok) lastActionAt = Date.now();
-      if (ev === 'player:farmState/sync') { const now = Date.now(); if (now - lastStateLog >= 30000) { lastStateLog = now; log.info('STATE', `gold=${state.gold} lvl=${state.level} stars=${state.stars} | owned=${state.ownedTiles().length} grass=${state.grassEmpty().length} tilled=${state.tilledEmpty().length} ready=${state.readyToHarvest().length} blocked=${state.blocked().length} expandable=${state.expandableTiles().length} orders=${state.completableOrders().length}/${state.orders.length} jobs=${state.claimableJobs().length}`); } }
+      if (ev === 'player:farmState/sync') { const now = Date.now(); if (now - lastStateLog >= 30000) { lastStateLog = now; log.info('STATE', `gold=${state.gold} lvl=${state.level} stars=${state.stars} | owned=${state.ownedTiles().length} grass=${state.grassEmpty().length} tilled=${state.tilledEmpty().length} ready=${state.readyToHarvest().length} dead=${state.deadCrops().length} blocked=${state.blocked().length} expandable=${state.expandableTiles().length} orders=${state.completableOrders().length}/${state.orders.length} jobs=${state.claimableJobs().length}`); } }
     });
     let lastQueueLog = 0, queuedNotified = false;
     gs.on('queue', (d) => {
