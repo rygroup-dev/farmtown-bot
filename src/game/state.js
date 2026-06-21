@@ -56,6 +56,9 @@ export class GameState {
   ownedTiles() { return [...this.tiles.values()].filter(t => t.ownerState === 'owned'); }
   tilledEmpty() { return this.ownedTiles().filter(t => t.groundState === 'tilled' && !t.cropId && t.blocker === 'none'); }
   grassEmpty() { return this.ownedTiles().filter(t => t.groundState === 'grass' && t.blocker === 'none'); }
+  // Tiles that need hoeing before planting: fresh grass OR 'cleared' ground (left
+  // after a blocker is cleared or a crop is harvested/removed). Both → hoe → 'tilled'.
+  hoeable() { return this.ownedTiles().filter(t => (t.groundState === 'grass' || t.groundState === 'cleared') && t.blocker === 'none' && !t.cropId); }
   blocked() { return this.ownedTiles().filter(t => t.blocker && t.blocker !== 'none'); }
   readyToHarvest() { const now = Date.now(); return this.ownedTiles().filter(t => t.cropId && t.readyAt && t.readyAt <= now); }
   buyableTiles() { return [...this.tiles.values()].filter(t => t.ownerState === 'buyable' || t.ownerState === 'locked'); }

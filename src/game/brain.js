@@ -6,7 +6,7 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
     plan.push({ kind:'harvest', event:'crop:harvest/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'harvest', tool:'hoe' } });
   for (const t of state.blocked())
     plan.push({ kind:'clear', event:'tile:clear/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'clear', tool:'axe' } });
-  for (const t of state.grassEmpty())
+  for (const t of state.hoeable())
     plan.push({ kind:'hoe', event:'tile:hoe/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'hoe', tool:'hoe' } });
 
   const demand = state.cropDemand();
