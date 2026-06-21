@@ -144,6 +144,27 @@ Deep dives: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) (reverse-engineered wire prot
 
 ---
 
+## 👥 Multi-account (experimental, opt-in)
+
+Run up to **50 farms at once** (main + 49 generated sub-wallets), all from one Telegram
+bot, with every sub's earned `$FARM` auto-swept to your main wallet.
+
+A server constraint shapes the design: **one Supabase session authorizes only one wallet
+at a time**, and anonymous sign-up is captcha-gated — so *each account needs its own
+session*. With a `CAPTCHA_API_KEY` the bot **auto-mints** a session per sub (no browser
+paste); you only fund each sub a little SOL for gas.
+
+```
+/genwallets 5          # create 5 sub-wallets (data/wallets.json, chmod 600)
+/accounts              # list all wallets + on-chain SOL/$FARM + live level/gold
+/mintsession           # verify your captcha key works (mints a throwaway session)
+# fund each sub's address with a little SOL, then set MULTI_ACCOUNT=on and restart
+/sweep                 # force-collect all sub $FARM → main (also automatic ~every 1.5h)
+```
+
+Gated behind `MULTI_ACCOUNT=off` by default — the single-account path above is unchanged.
+Verify with 1–2 subs before scaling up. `/accounts` and `/sweep` work even without the engine on.
+
 ## 🖥️ Running 24/7 (systemd)
 
 The installer can do this for you. Manually:
