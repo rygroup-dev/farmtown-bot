@@ -1,8 +1,7 @@
-# FarmTown Game Mechanics (full RE)
+# FarmTown Game Mechanics
 
-Reverse-engineered from the client bundle (`index-*.js` 554KB), 9 lazy panel chunks,
-the 3D world chunk (`FarmTownThreeWorld` 621KB), and ~70 API responses in the HAR.
-This is the complete game model the bot reasons about.
+A reference for the complete game model the bot reasons about — economy, tiles, crops,
+orders, jobs, the Farmer Pool, and progression.
 
 ## 1. The money layer — $FARM token + Stars (the real "profit")
 

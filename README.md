@@ -166,7 +166,7 @@ one-liner).
 | Control | `src/telegram/bot.js` | command router + push notifications |
 | Core | `src/core/orchestrator.js`, `src/index.js` | lifecycle, reconnect, tick loop |
 
-Deep dives: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) (reverse-engineered wire protocol),
+Deep dives: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) (wire-protocol reference),
 [`docs/GAME_MECHANICS.md`](docs/GAME_MECHANICS.md) (economy, orders, pool).
 
 ---

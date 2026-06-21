@@ -1,6 +1,7 @@
-# FarmTown Protocol Reference (reverse-engineered)
+# FarmTown Protocol Reference
 
-Source: 137MB HAR + live testing, 2026-06-20. Account wallet = `.env` (`<your-burner-wallet>`).
+A reference for the realtime (socket.io) and REST protocol the bot speaks. The account
+wallet is configured in `.env`.
 
 ## Auth (3 stages)
 1. **Supabase anon session** (browser, Turnstile-gated): gives `access_token` (ES256 JWT, ~1h) + `refresh_token`. Refresh without captcha: `POST {SUPABASE_URL}/auth/v1/token?grant_type=refresh_token` with header `apikey: <anon key>`, body `{refresh_token}`.
