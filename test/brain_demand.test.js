@@ -80,3 +80,28 @@ test('buys the right number of each seed when short', () => {
   // 3 carrots needed, 1 in stock → buy 2
   assert.equal(buys.filter(x => x === 'carrot_seed').length, 2);
 });
+
+test('expansion reserve scales with farm size — a big farm waits until truly wealthy', () => {
+  const mkFarm = (owned, gold) => {
+    const s = new GameState();
+    s.gold = gold;
+    for (let i = 0; i < owned; i++) s.tiles.set(`${i},0`, { x:i, y:0, ownerState:'owned', groundState:'planted', blocker:'none', cropId:'carrot', readyAt: Date.now()+99999 });
+    s.tiles.set('0,1', { x:0, y:1, ownerState:'locked' }); // adjacent expandable
+    return s;
+  };
+  const expands = (s) => planActions(s, eco, { goldReserve: 2000 }).some(a => a.kind === 'buyPlot');
+  // 60-tile farm needs >= 60*250 = 15000 gold to expand
+  assert.equal(expands(mkFarm(60, 10000)), false, 'gold-starved big farm does NOT expand');
+  assert.equal(expands(mkFarm(60, 20000)), true,  'wealthy big farm expands');
+  // small farm only needs the flat floor (2000)
+  assert.equal(expands(mkFarm(3, 5000)), true, 'small farm expands on modest gold');
+});
+
+test('does not expand while there is an unworked backlog (>=4)', () => {
+  const s = new GameState();
+  s.gold = 1000000;
+  // 5 tilled-empty tiles = backlog 5 (>=4) → no expansion even when rich
+  for (let i = 0; i < 5; i++) s.tiles.set(`${i},0`, { x:i, y:0, ownerState:'owned', groundState:'tilled', blocker:'none', cropId:null });
+  s.tiles.set('0,1', { x:0, y:1, ownerState:'locked' });
+  assert.equal(planActions(s, eco, { goldReserve: 2000, maxPlantsPerTick: 0 }).some(a => a.kind === 'buyPlot'), false);
+});
