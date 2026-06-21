@@ -115,7 +115,7 @@ export async function runAccount() {
     gs.on('down', (reason) => { flags.connected = false; scheduleReconnect(reason); });
   }
 
-  let reconnectAttempt = 0;
+  let reconnectAttempt = 0, authFailStreak = 0;
   async function scheduleReconnect(reason) {
     if (reconnecting || !flags.running) return;
     reconnecting = true;
@@ -131,8 +131,14 @@ export async function runAccount() {
     try {
       await reauth();
       connect();
+      authFailStreak = 0;
     } catch (e) {
       log.error('RECONNECT', e.message + ' — retrying');
+      // If auth keeps failing (refresh_token dead + access_token expired), the pasted
+      // Supabase session is gone — tell the user to re-paste (once, not spammy).
+      if (/challenge failed: 401|verify failed|refresh/i.test(e.message) && ++authFailStreak === 5) {
+        tg.notify('⚠️ <b>Session expired</b> — bot can\'t re-auth. Please paste a fresh Supabase session (incognito → localStorage auth-token) so I can resume.');
+      }
     } finally {
       // ALWAYS release the guard so the next 'down' can schedule another attempt.
       reconnecting = false;
