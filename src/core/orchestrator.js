@@ -8,9 +8,10 @@ import { bindWallet, walletSessionPlayerId } from '../auth/wallet.js';
 import { GameSocket } from '../net/socket.js';
 import { GameState } from '../game/state.js';
 import { ActionRunner } from '../game/actions.js';
-import { planActions, planClaims } from '../game/brain.js';
+import { planActions, planClaims, planStorage } from '../game/brain.js';
 import { loadEconomy } from '../game/economy.js';
-import { withinActiveHours, sleep, gaussianDelay, maybeBreak } from '../safety/humanizer.js';
+import { maybeContribute } from '../game/farmerpool.js';
+import { withinActiveHours, secondsUntilInactive, sleep, gaussianDelay, maybeBreak } from '../safety/humanizer.js';
 import { startTelegram } from '../telegram/bot.js';
 
 export async function runAccount() {
@@ -113,12 +114,28 @@ export async function runAccount() {
     }
   })();
 
+  // Farmer's Pool earn loop: once at L10+ and the daily pool is open, contribute claim
+  // power (farm points by default; gold only if POOL_BURN_GOLD=on) to earn $FARM.
+  (async function farmerPoolLoop() {
+    while (flags.running) {
+      await sleep(gaussianDelay(540000, 660000)); // ~10 min
+      if (!config.pool.enabled || !flags.connected || state.level < 10) continue;
+      const r = await maybeContribute(rest, { burnGold: config.pool.burnGold, goldReserve: config.pool.goldReserve });
+      if (r?.contributed) tg.notify(`💎 Farmer's Pool: contributed claim power — earning $FARM`);
+    }
+  })();
+
   while (flags.running) {
     try {
       const active = withinActiveHours(config.activeHours);
       if (flags.connected && !flags.paused && flags.autopilot && active) {
         while (manualQueue.length) { const m = manualQueue.shift(); await handleManual(m, { state, runner, flags }); }
-        const plan = [...planClaims(state), ...planActions(state, eco, { objective: flags.forceCrop ? 'gold' : 'balanced' })];
+        const timeBudgetSeconds = secondsUntilInactive(config.activeHours);
+        const plan = [
+          ...planClaims(state),
+          ...planActions(state, eco, { objective: flags.forceCrop ? 'gold' : 'balanced', timeBudgetSeconds }),
+          ...planStorage(state),
+        ];
         if (plan.length) {
           for (const a of plan) {
             if (!flags.running || flags.paused) break;

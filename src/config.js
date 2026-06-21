@@ -20,6 +20,11 @@ export const config = {
   activeHours: process.env.ACTIVE_HOURS || '06:00-23:30',
   tile: { size: 32, originPx: 16 },
   limits: { maxPendingActions: 1, minActionGapMs: 900, maxActionGapMs: 2600 },
+  pool: {
+    enabled: process.env.FARMER_POOL !== 'off',
+    burnGold: process.env.POOL_BURN_GOLD === 'on', // default: keep gold for farming
+    goldReserve: Number(process.env.POOL_GOLD_RESERVE || 100000),
+  },
   sessionFile: 'data/session.json',
 };
 export const walletAddress = config.keypair.publicKey.toBase58();
