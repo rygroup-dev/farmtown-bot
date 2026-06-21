@@ -37,6 +37,8 @@ export async function runAccount() {
     session.walletSessionToken = v.walletSessionToken;
     rest.setWalletSession(session.walletSessionToken); // x-farmtown-wallet-session header
     session.persistentPlayerId = walletSessionPlayerId(session.walletSessionToken) || session.persistentPlayerId || crypto.randomUUID();
+    // Set the in-game display name server-side (best-effort).
+    try { await rest.req('/api/auth/profile', { method: 'POST', retries: 0, timeoutMs: 20000, body: { displayName: config.displayName } }); } catch {}
     saveSession(session);
     return v;
   }
