@@ -26,6 +26,9 @@ export const COMMAND_MENU = [
   ['pool', 'Farmer pool ($FARM) status'],
   ['economy', 'Top crops by profit'],
   ['wallet', 'Wallet address'],
+  ['accounts', 'All accounts + balances'],
+  ['genwallets', '<n> generate sub-wallets'],
+  ['sweep', 'Send all sub $FARM → main'],
   ['start', 'Start the bot'],
   ['stop', 'Stop the bot'],
   ['pause', 'Pause autopilot'],
@@ -163,6 +166,34 @@ export async function dispatchCommand(text, ctx, send) {
       case '/wallet':
         return send(`👛 <b>Wallet</b>\n<code>${esc(ctx.walletAddress)}</code>`);
 
+      case '/accounts': {
+        if (!ctx.accountsInfo) return send('👥 Multi-account not available in this build.');
+        await send('👥 Fetching on-chain balances…');
+        const list = await ctx.accountsInfo();
+        const max = (ctx.maxSubWallets || 49) + 1;
+        const lines = list.map(a => `${a.isMain ? '⭐' : '•'} <b>${esc(a.label)}</b> <code>${esc(a.address.slice(0, 4) + '…' + a.address.slice(-4))}</code> — ◎${(a.sol || 0).toFixed(3)} • 🌾${fmt(Math.floor(a.farm || 0))}`);
+        const totFarm = list.reduce((s, a) => s + (a.farm || 0), 0);
+        const totSol = list.reduce((s, a) => s + (a.sol || 0), 0);
+        return send(`👥 <b>Accounts ${list.length}/${max}</b>\n${lines.join('\n')}\n\nTotal: ◎${totSol.toFixed(3)} SOL • 🌾${fmt(Math.floor(totFarm))} $FARM`);
+      }
+      case '/genwallets': {
+        if (!ctx.genWallets) return send('🔑 Multi-account not available in this build.');
+        const n = Number(args[0]);
+        if (!Number.isFinite(n) || n < 1) return send(`🔑 Usage: <code>/genwallets &lt;n&gt;</code> — create n sub-wallets (max ${ctx.maxSubWallets || 49} total subs).`);
+        const r = ctx.genWallets(n);
+        return send(`🔑 Generated <b>${r.added}</b> sub-wallet(s) (total ${r.total}/${ctx.maxSubWallets || 49}${r.room === 0 ? ', cap reached' : ''}).\nFund each with a little SOL for gas, then /accounts to view. Sub-wallets earn $FARM and you /sweep it to your main wallet.`);
+      }
+      case '/sweep': {
+        if (!ctx.sweepAll) return send('🧹 Multi-account not available in this build.');
+        await send('🧹 Sweeping $FARM from all sub-wallets → main…');
+        const res = await ctx.sweepAll();
+        if (!res.length) return send('🧹 No sub-wallets yet — /genwallets first.');
+        const ok = res.filter(r => r.ok);
+        const sent = ok.reduce((s, r) => s + (r.amount || 0), 0);
+        const lines = res.map(r => `${r.ok ? '✅' : '⚠️'} ${esc(r.label)}: ${r.ok ? fmt(r.amount) + ' FARM' : esc(r.reason || 'skip')}`);
+        return send(`🧹 <b>Sweep done</b> — ${ok.length}/${res.length} sent, ${fmt(sent)} $FARM → main.\n${lines.join('\n')}`);
+      }
+
       case '/start': ctx.flags.running = true; ctx.flags.paused = false; return send('🚀 <b>Started</b>');
       case '/stop': ctx.flags.running = false; return send('🛑 <b>Stopped</b>');
       case '/pause': ctx.flags.paused = true; return send('⏸️ <b>Paused</b>');
@@ -252,6 +283,7 @@ export async function dispatchCommand(text, ctx, send) {
         return send(
           `📖 <b>FarmTown Sentinel</b>\n\n` +
           `<b>INFO</b> /status /balance /farm /inventory /basket /orders /jobs /quests /mastery /stats /pool /economy /wallet\n\n` +
+          `<b>MULTI-ACCOUNT</b> /accounts /genwallets /sweep\n\n` +
           `<b>CONTROL</b> /start /stop /pause /resume /autopilot /objective /setcrop /reserve /sethours /poolburn\n\n` +
           `<b>ACTIONS</b> /harvest /plant /plantall /buyplot /buyseed /upgradestorage /claimpool /auth /reconnect /restart\n\n` +
           `<b>DIAG</b> /log /ping /help`

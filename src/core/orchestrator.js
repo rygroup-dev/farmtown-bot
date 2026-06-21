@@ -13,6 +13,7 @@ import { planActions, planClaims, planStorage } from '../game/brain.js';
 import { loadEconomy } from '../game/economy.js';
 import { maybeContribute, pollFarmerPool } from '../game/farmerpool.js';
 import { getWalletInfo, withdrawFarm } from '../game/wallet_info.js';
+import { buildRoster, generateSubWallets, MAX_SUB_WALLETS } from '../wallets.js';
 import { withinActiveHours, secondsUntilInactive, sleep, gaussianDelay, maybeBreak } from '../safety/humanizer.js';
 import { startTelegram } from '../telegram/bot.js';
 
@@ -69,6 +70,30 @@ export async function runAccount() {
     walletInfo: () => getWalletInfo(),
     withdraw: () => withdrawFarm(config.withdrawAddress),
     withdrawAddress: config.withdrawAddress,
+    // --- multi-account (main + up to 49 sub wallets, one shared Supabase session) ---
+    maxSubWallets: MAX_SUB_WALLETS,
+    genWallets: (n) => generateSubWallets(n),
+    accountsInfo: async () => {
+      const out = [];
+      for (const a of buildRoster(config.keypair)) {
+        let info = { sol: 0, farm: 0 };
+        try { info = await getWalletInfo(a.keypair); } catch { /* RPC may fail */ }
+        out.push({ label: a.label, address: a.address, isMain: a.isMain, sol: info.sol, farm: info.farm });
+      }
+      return out;
+    },
+    // Sweep ALL $FARM from every sub wallet into the MAIN wallet. Needs a little SOL gas
+    // in each sub wallet (the user funds that). Never throws — returns a per-sub summary.
+    sweepAll: async () => {
+      const mainAddr = config.keypair.publicKey.toBase58();
+      const res = [];
+      for (const a of buildRoster(config.keypair)) {
+        if (a.isMain) continue;
+        const r = await withdrawFarm(mainAddr, a.keypair);
+        res.push({ label: a.label, ...r });
+      }
+      return res;
+    },
     starBundles: async () => { const r = await rest.req('/api/token/stars/bundles', { timeoutMs: 20000 }); return r.json?.bundles || []; },
     manual: (kind, arg) => manualQueue.push({ kind, arg }),
     // Paste a fresh Supabase session from Telegram → write it + force an immediate
@@ -268,6 +293,23 @@ export async function runAccount() {
       } else if (r?.pool && r.pool !== 'active') {
         poolNotified = false; // pool closed/paused → re-announce when it next opens
       }
+    }
+  })();
+
+  // Auto-sweep: periodically move every sub wallet's earned $FARM to the MAIN wallet,
+  // so you only ever fund subs with a little SOL for gas and collect $FARM in one place.
+  // No-op (and silent) when there are no sub wallets or nothing to send.
+  (async function autoSweepLoop() {
+    while (flags.running) {
+      await sleep(gaussianDelay(5400000, 6600000)); // ~1.5–1.8h
+      try {
+        const roster = buildRoster(config.keypair).filter(a => !a.isMain);
+        if (!roster.length) continue;
+        const mainAddr = config.keypair.publicKey.toBase58();
+        let sent = 0, n = 0;
+        for (const a of roster) { const r = await withdrawFarm(mainAddr, a.keypair); if (r.ok) { sent += r.amount || 0; n++; } }
+        if (n > 0) tg.notify(`🧹 Auto-swept ${n} sub-wallet(s): ${Math.floor(sent)} $FARM → main wallet.`);
+      } catch (e) { log.warn('SWEEP', e.message); }
     }
   })();
 

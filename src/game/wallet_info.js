@@ -13,9 +13,9 @@ const FARM_MINT = new PublicKey('yMJPZbnhoHib3ib8n8PfiVcp9yauk1vnaGKLx7epump');
 const DECIMALS = 1e6;
 const conn = () => new Connection(config.solanaRpc, 'confirmed');
 
-export async function getWalletInfo() {
+export async function getWalletInfo(keypair = config.keypair) {
   const c = conn();
-  const owner = config.keypair.publicKey;
+  const owner = keypair.publicKey;
   let sol = 0, farm = 0;
   try { sol = (await c.getBalance(owner)) / 1e9; } catch (e) { log.warn('WALLET', 'sol balance: ' + e.message); }
   try {
@@ -28,13 +28,13 @@ export async function getWalletInfo() {
 
 // Transfer ALL $FARM from the bot wallet to `toAddress` (your main wallet). Needs a
 // little SOL in the bot wallet for fees / ATA rent. Never throws — returns a summary.
-export async function withdrawFarm(toAddress) {
+export async function withdrawFarm(toAddress, fromKeypair = config.keypair) {
   try {
     if (!toAddress) return { ok: false, reason: 'no WITHDRAW_ADDRESS set' };
     let toPub;
     try { toPub = new PublicKey(toAddress); } catch { return { ok: false, reason: 'invalid address' }; }
     const c = conn();
-    const from = config.keypair;
+    const from = fromKeypair;
     const fromAta = await getAssociatedTokenAddress(FARM_MINT, from.publicKey);
     let amount;
     try { amount = (await getAccount(c, fromAta)).amount; } catch { return { ok: false, reason: 'no FARM token account / 0 balance' }; }

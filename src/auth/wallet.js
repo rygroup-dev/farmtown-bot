@@ -2,11 +2,15 @@ import nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import { config, walletAddress } from '../config.js';
 
-export function signMessage(message) {
-  const sig = nacl.sign.detached(new TextEncoder().encode(message), config.keypair.secretKey);
+export function signMessage(message, keypair = config.keypair) {
+  const sig = nacl.sign.detached(new TextEncoder().encode(message), keypair.secretKey);
   return bs58.encode(sig);
 }
-export async function bindWallet(rest) {
+// Bind a specific wallet (defaults to the main .env wallet). Each wallet verified under
+// the same Supabase session gets its OWN player profile + walletSessionToken — that's how
+// one pasted session drives many farms in multi-account mode.
+export async function bindWallet(rest, keypair = config.keypair) {
+  const walletAddress = keypair.publicKey.toBase58();
   // A wallet challenge is SINGLE-USE: never let rest.req auto-retry these POSTs.
   // If verify's response times out the server may have already consumed the
   // challenge — retrying would hit CHALLENGE_ALREADY_USED. Instead the caller
@@ -15,7 +19,7 @@ export async function bindWallet(rest) {
   const ch = await rest.req('/api/auth/wallet/challenge', { method: 'POST', body: { walletAddress }, retries: 0, timeoutMs: 45000 });
   if (ch.status !== 200 || !ch.json?.message) throw new Error('challenge failed: ' + ch.status);
   const { challengeId, nonce, message } = ch.json;
-  const signature = signMessage(message);
+  const signature = signMessage(message, keypair);
   const vr = await rest.req('/api/auth/wallet/verify', { method: 'POST', retries: 0, timeoutMs: 45000,
     body: { challengeId, nonce, walletAddress, message, signature } });
   if (vr.status !== 200 || !vr.json?.gameplayAllowed) throw new Error('verify failed: ' + JSON.stringify(vr.json).slice(0, 200));
