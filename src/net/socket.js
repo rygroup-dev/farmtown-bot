@@ -78,6 +78,7 @@ export class GameSocket extends EventEmitter {
       name: this.displayName,
       persistentPlayerId: this.persistentPlayerId,
       accessToken: this.accessToken,
+      walletSessionToken: this.walletSessionToken, // required since the 2026-06 update
     });
     this.socket.emit('farm:snapshot:request');
   }
