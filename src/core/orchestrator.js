@@ -92,10 +92,12 @@ export async function runAccount() {
   }
 
   let gs, runner, lastStateLog = 0, reconnecting = false, lastActionAt = Date.now(), lastSnapshotAt = 0;
+  let lastEventAt = Date.now(), reconnectingSince = 0;
   function connect() {
     gs = new GameSocket({ accessToken: session.access_token, walletSessionToken: session.walletSessionToken, displayName: config.displayName, persistentPlayerId: session.persistentPlayerId }).connect();
     runner = new ActionRunner(gs);
     gs.on('event', (ev, data) => {
+      lastEventAt = Date.now();
       state.apply(ev, data);
       if (ev === 'player:farmState/sync' && !stats.goldStart) stats.goldStart = state.gold;
       if (ev === 'game:actionResult' && data.ok) log.info('ACT', (data.type || '?') + ' ok' + (data.message ? (' — ' + data.message) : ''));
@@ -117,6 +119,7 @@ export async function runAccount() {
   async function scheduleReconnect(reason) {
     if (reconnecting || !flags.running) return;
     reconnecting = true;
+    reconnectingSince = Date.now();
     flags.connected = false;
     try { gs?.close(); } catch {}
     const backoff = Math.min(2000 * 2 ** reconnectAttempt, 30000) + gaussianDelay(500, 2500);
@@ -132,10 +135,8 @@ export async function runAccount() {
       log.error('RECONNECT', e.message + ' — retrying');
     } finally {
       // ALWAYS release the guard so the next 'down' can schedule another attempt.
-      // If reauth/connect failed, the freshly-created (or absent) socket's next
-      // 'down'/'connect_error' re-enters scheduleReconnect; if reauth threw before
-      // connect(), kick a delayed retry here.
       reconnecting = false;
+      reconnectingSince = 0;
     }
     if (!flags.connected && flags.running && !gs?.socket?.connected) {
       // no socket alive after this attempt → ensure another try is scheduled
@@ -143,6 +144,33 @@ export async function runAccount() {
     }
   }
   connect();
+
+  // WATCHDOG — guarantees the bot always recovers connectivity. Independent of the
+  // event-driven reconnect, it catches: (a) zombie connections (joined but no events
+  // for >90s = half-open socket), (b) a stuck reconnect guard (>180s), and (c) being
+  // disconnected with nothing in flight. Any of these → force a reconnect.
+  (async function watchdog() {
+    while (flags.running) {
+      await sleep(30000);
+      const now = Date.now();
+      try {
+        if (flags.connected && now - lastEventAt > 90000) {
+          log.warn('WATCHDOG', `no events for ${Math.round((now - lastEventAt) / 1000)}s — zombie connection, forcing reconnect`);
+          flags.connected = false;
+          try { gs?.close(); } catch {}
+          reconnecting = false; reconnectingSince = 0;
+          scheduleReconnect('watchdog-zombie');
+        } else if (reconnecting && reconnectingSince && now - reconnectingSince > 180000) {
+          log.warn('WATCHDOG', 'reconnect stuck >180s — resetting guard');
+          reconnecting = false; reconnectingSince = 0;
+          scheduleReconnect('watchdog-stuck');
+        } else if (!flags.connected && !reconnecting) {
+          log.warn('WATCHDOG', 'disconnected and idle — kicking reconnect');
+          scheduleReconnect('watchdog-idle');
+        }
+      } catch (e) { log.warn('WATCHDOG', e.message); }
+    }
+  })();
 
   (async function keepalive() {
     while (flags.running) {
