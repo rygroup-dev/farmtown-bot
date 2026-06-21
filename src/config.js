@@ -28,5 +28,6 @@ export const config = {
     goldReserve: Number(process.env.POOL_GOLD_RESERVE || 100000),
   },
   sessionFile: 'data/session.json',
+  multiAccount: process.env.MULTI_ACCOUNT === 'on',
 };
 export const walletAddress = config.keypair.publicKey.toBase58();

@@ -1,6 +1,25 @@
 import fs from 'node:fs';
 import { config } from '../config.js';
 import { log } from '../logger.js';
+import { solveTurnstile, captchaEnabled } from './captcha.js';
+
+// Mint a BRAND-NEW anonymous Supabase session by solving the Turnstile captcha — no
+// browser paste needed. Each call yields a fresh independent session (its own
+// access_token + refresh_token), which is exactly what each multi-account sub needs.
+// Requires CAPTCHA_API_KEY. Returns a session object ready to bind a wallet to.
+export async function mintSession(rest) {
+  if (!captchaEnabled()) throw new Error('CAPTCHA_API_KEY not set — cannot auto-mint sessions');
+  const captcha_token = await solveTurnstile();
+  const r = await rest.req('/auth/v1/signup', {
+    method: 'POST', base: config.supabaseUrl, apikey: config.supabaseAnonKey, retries: 0, timeoutMs: 30000,
+    body: { data: {}, gotrue_meta_security: { captcha_token } },
+  });
+  if (r.status === 200 && r.json?.access_token) {
+    log.info('SESSION', 'minted fresh anonymous session via captcha');
+    return { access_token: r.json.access_token, refresh_token: r.json.refresh_token, obtainedAt: Date.now() };
+  }
+  throw new Error('mintSession failed: ' + (r.json?.msg || r.json?.error_code || r.status));
+}
 
 export function loadSession() {
   try { return JSON.parse(fs.readFileSync(config.sessionFile, 'utf8')); } catch { return null; }

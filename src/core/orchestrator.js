@@ -3,9 +3,11 @@ import fs from 'node:fs';
 import { config, walletAddress } from '../config.js';
 import { log } from '../logger.js';
 import { Rest } from '../net/rest.js';
-import { loadSession, saveSession, refreshSupabase, supabaseExpiringSoon, keepWalletSessionAlive, walletSessionExpiringSoon, parseSupabaseSession } from '../auth/session.js';
+import { loadSession, saveSession, refreshSupabase, supabaseExpiringSoon, keepWalletSessionAlive, walletSessionExpiringSoon, parseSupabaseSession, mintSession } from '../auth/session.js';
+import { captchaEnabled } from '../auth/captcha.js';
 import { bootstrapSession } from '../auth/bootstrap.js';
 import { bindWallet, walletSessionPlayerId } from '../auth/wallet.js';
+import { subSessionStore, hasSubSession } from '../sub_sessions.js';
 import { GameSocket } from '../net/socket.js';
 import { GameState } from '../game/state.js';
 import { ActionRunner } from '../game/actions.js';
@@ -13,21 +15,35 @@ import { planActions, planClaims, planStorage } from '../game/brain.js';
 import { loadEconomy } from '../game/economy.js';
 import { maybeContribute, pollFarmerPool } from '../game/farmerpool.js';
 import { getWalletInfo, withdrawFarm } from '../game/wallet_info.js';
-import { buildRoster, generateSubWallets, MAX_SUB_WALLETS } from '../wallets.js';
+import { buildRoster, generateSubWallets, parseSecret, loadSubWallets, MAX_SUB_WALLETS } from '../wallets.js';
 import { withinActiveHours, secondsUntilInactive, sleep, gaussianDelay, maybeBreak } from '../safety/humanizer.js';
 import { startTelegram } from '../telegram/bot.js';
 
-export async function runAccount() {
+export async function runAccount(account = {}) {
+  const {
+    keypair = config.keypair,
+    label = 'main',
+    isMain = true,
+    sharedTg = null,
+    registry = null,
+    sessionStore = { load: loadSession, save: saveSession },
+  } = account;
+  const addr = keypair.publicKey.toBase58();
+  const displayName = isMain ? config.displayName : `${config.displayName}_${label}`;
+  const tag = isMain ? '' : `[${label}] `;
   const rest = new Rest();
-  const eco = loadEconomy();
+  const eco = account.eco || loadEconomy();
   const state = new GameState();
   const flags = { running: true, paused: false, autopilot: true, connected: false, forceCrop: null, objective: 'balanced' };
   const settings = { activeHours: config.activeHours, goldReserve: 2000, poolBurnGold: config.pool.burnGold };
   const stats = { started: Date.now(), harvests: 0, plants: 0, goldStart: 0 };
   const manualQueue = [];
+  const reg = registry || new Map(); // shared engine registry (for /accounts); main owns it
 
-  let session = loadSession();
-  if (!session) session = await bootstrapSession();
+  let session = sessionStore.load();
+  // No session yet? AUTO-MINT one via captcha (gas-only multi-account) — else fall back to
+  // the one-time browser bootstrap (main account when no captcha key is configured).
+  if (!session) session = captchaEnabled() ? await mintSession(rest) : await bootstrapSession();
 
   // Initial auth, retried — the server is sometimes in maintenance / flaky on boot
   // and bind can 401/time-out. Retry with backoff instead of crashing the process.
@@ -35,13 +51,13 @@ export async function runAccount() {
     if (supabaseExpiringSoon(session)) await refreshSupabase(session, rest);
     if (session.cookieHeader) rest.setCookie(session.cookieHeader);
     rest.setBearer(session.access_token);
-    const v = await bindWallet(rest);
+    const v = await bindWallet(rest, keypair);
     session.walletSessionToken = v.walletSessionToken;
     rest.setWalletSession(session.walletSessionToken); // x-farmtown-wallet-session header
     session.persistentPlayerId = walletSessionPlayerId(session.walletSessionToken) || session.persistentPlayerId || crypto.randomUUID();
     // Set the in-game display name server-side (best-effort).
-    try { await rest.req('/api/auth/profile', { method: 'POST', retries: 0, timeoutMs: 20000, body: { displayName: config.displayName } }); } catch {}
-    saveSession(session);
+    try { await rest.req('/api/auth/profile', { method: 'POST', retries: 0, timeoutMs: 20000, body: { displayName } }); } catch {}
+    sessionStore.save(session);
     return v;
   }
   let verified, authAttempt = 0;
@@ -50,14 +66,14 @@ export async function runAccount() {
     catch (e) {
       authAttempt++;
       const wait = Math.min(5000 * authAttempt, 60000);
-      log.warn('AUTH', `failed (${e.message}) — retry in ${Math.round(wait / 1000)}s (attempt ${authAttempt})`);
+      log.warn('AUTH', `${tag}failed (${e.message}) — retry in ${Math.round(wait / 1000)}s (attempt ${authAttempt})`);
       await sleep(wait);
     }
   }
-  log.info('AUTH', `gameplayAllowed wallet=${verified.walletAddress} player=${session.persistentPlayerId}`);
+  log.info('AUTH', `${tag}gameplayAllowed wallet=${addr} player=${session.persistentPlayerId}`);
 
-  const tg = startTelegram({
-    state, flags, walletAddress, economy: eco,
+  const ctx = {
+    state, flags, walletAddress: addr, economy: eco, registry: reg,
     stats: () => {
       const upMin = Math.round((Date.now() - stats.started) / 60000);
       const goldGain = state.gold - (stats.goldStart || state.gold);
@@ -73,12 +89,22 @@ export async function runAccount() {
     // --- multi-account (main + up to 49 sub wallets, one shared Supabase session) ---
     maxSubWallets: MAX_SUB_WALLETS,
     genWallets: (n) => generateSubWallets(n),
+    // Verify the captcha key works by minting one throwaway session (no wallet bound).
+    testMint: async () => {
+      try {
+        const s = await mintSession(new Rest());
+        let expMin = null; try { expMin = Math.round((JSON.parse(Buffer.from(s.access_token.split('.')[1], 'base64').toString('utf8')).exp * 1000 - Date.now()) / 60000); } catch {}
+        return { ok: true, expMin };
+      } catch (e) { return { ok: false, reason: e.message }; }
+    },
     accountsInfo: async () => {
       const out = [];
       for (const a of buildRoster(config.keypair)) {
         let info = { sol: 0, farm: 0 };
         try { info = await getWalletInfo(a.keypair); } catch { /* RPC may fail */ }
-        out.push({ label: a.label, address: a.address, isMain: a.isMain, sol: info.sol, farm: info.farm });
+        const e = reg.get(a.label); // live farm state if this account's engine is running
+        out.push({ label: a.label, address: a.address, isMain: a.isMain, sol: info.sol, farm: info.farm,
+          running: !!e, connected: !!e?.flags?.connected, level: e?.state?.level, gold: e?.state?.gold });
       }
       return out;
     },
@@ -123,7 +149,11 @@ export async function runAccount() {
       else if (key === 'forceCrop') flags.forceCrop = (val === 'auto' || val === 'off' || !val) ? null : val;
       return `${key} = ${val}`;
     },
-  });
+  };
+  // Only the MAIN account runs the Telegram bot; sub accounts are headless farmers that
+  // share the main bot's notifier and report into the shared registry (for /accounts).
+  const tg = isMain ? startTelegram(ctx) : (sharedTg || { notify() {} });
+  reg.set(label, { label, isMain, addr, state, flags, stats });
 
   // Re-auth on (re)connect. Refresh Supabase only when its JWT is near expiry, and
   // REUSE the existing wallet session token until it's near its own 30-min expiry —
@@ -133,12 +163,12 @@ export async function runAccount() {
     if (supabaseExpiringSoon(session)) await refreshSupabase(session, rest);
     rest.setBearer(session.access_token);
     if (walletSessionExpiringSoon(session)) {
-      const v = await bindWallet(rest);
+      const v = await bindWallet(rest, keypair);
       session.walletSessionToken = v.walletSessionToken;
-      saveSession(session);
-      log.info('AUTH', 're-verified wallet (session was expiring)');
+      sessionStore.save(session);
+      log.info('AUTH', tag + 're-verified wallet (session was expiring)');
     } else {
-      log.info('AUTH', 'reusing valid wallet session (skip verify)');
+      log.info('AUTH', tag + 'reusing valid wallet session (skip verify)');
     }
     rest.setWalletSession(session.walletSessionToken);
   }
@@ -146,7 +176,7 @@ export async function runAccount() {
   let gs, runner, lastStateLog = 0, reconnecting = false, lastActionAt = Date.now(), lastSnapshotAt = 0;
   let lastEventAt = Date.now(), reconnectingSince = 0;
   function connect() {
-    gs = new GameSocket({ accessToken: session.access_token, walletSessionToken: session.walletSessionToken, displayName: config.displayName, persistentPlayerId: session.persistentPlayerId }).connect();
+    gs = new GameSocket({ accessToken: session.access_token, walletSessionToken: session.walletSessionToken, displayName, persistentPlayerId: session.persistentPlayerId }).connect();
     runner = new ActionRunner(gs);
     gs.on('event', (ev, data) => {
       lastEventAt = Date.now();
@@ -235,6 +265,24 @@ export async function runAccount() {
   }
   connect();
 
+  // MULTI-ACCOUNT: the main account spawns a concurrent headless farming engine for every
+  // generated sub-wallet, each under its OWN auto-minted Supabase session (captcha). They
+  // share this Telegram bot + registry and sweep their $FARM to main. Gated by MULTI_ACCOUNT.
+  if (isMain && config.multiAccount) {
+    const subs = loadSubWallets();
+    if (subs.length && !captchaEnabled()) {
+      tg.notify('⚠️ MULTI_ACCOUNT is on but CAPTCHA_API_KEY is unset — sub-accounts each need their own session. Set CAPTCHA_API_KEY to auto-mint them.');
+    }
+    log.info('MULTI', `spawning ${subs.length} sub-account engine(s)`);
+    for (const w of subs) {
+      const subLabel = `sub${w.index}`;
+      runAccount({ keypair: parseSecret(w.secretKey), label: subLabel, isMain: false, sharedTg: tg, registry: reg, sessionStore: subSessionStore(subLabel), eco })
+        .catch((e) => log.error('MULTI', `${subLabel} crashed: ${e.message}`));
+      await sleep(gaussianDelay(8000, 15000)); // stagger starts (captcha solves + anti-thundering-herd)
+    }
+    if (subs.length) tg.notify(`👥 Multi-account: started ${subs.length} sub-farm(s) + main. /accounts to monitor.`);
+  }
+
   // WATCHDOG — guarantees the bot always recovers connectivity. Independent of the
   // event-driven reconnect, it catches: (a) zombie connections (joined but no events
   // for >90s = half-open socket), (b) a stuck reconnect guard (>180s), and (c) being
@@ -300,6 +348,7 @@ export async function runAccount() {
   // so you only ever fund subs with a little SOL for gas and collect $FARM in one place.
   // No-op (and silent) when there are no sub wallets or nothing to send.
   (async function autoSweepLoop() {
+    if (!isMain) return; // only the main account runs the global sweep
     while (flags.running) {
       await sleep(gaussianDelay(5400000, 6600000)); // ~1.5–1.8h
       try {

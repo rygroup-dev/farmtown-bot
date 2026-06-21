@@ -28,6 +28,7 @@ export const COMMAND_MENU = [
   ['wallet', 'Wallet address'],
   ['accounts', 'All accounts + balances'],
   ['genwallets', '<n> generate sub-wallets'],
+  ['mintsession', 'Test captcha auto-login'],
   ['sweep', 'Send all sub $FARM → main'],
   ['start', 'Start the bot'],
   ['stop', 'Stop the bot'],
@@ -171,10 +172,21 @@ export async function dispatchCommand(text, ctx, send) {
         await send('👥 Fetching on-chain balances…');
         const list = await ctx.accountsInfo();
         const max = (ctx.maxSubWallets || 49) + 1;
-        const lines = list.map(a => `${a.isMain ? '⭐' : '•'} <b>${esc(a.label)}</b> <code>${esc(a.address.slice(0, 4) + '…' + a.address.slice(-4))}</code> — ◎${(a.sol || 0).toFixed(3)} • 🌾${fmt(Math.floor(a.farm || 0))}`);
+        const lines = list.map(a => {
+          const live = a.running ? ` | ${a.connected ? '🟢' : '🔴'} L${fmt(a.level)} ${fmt(a.gold)}g` : '';
+          return `${a.isMain ? '⭐' : '•'} <b>${esc(a.label)}</b> <code>${esc(a.address.slice(0, 4) + '…' + a.address.slice(-4))}</code> — ◎${(a.sol || 0).toFixed(3)} • 🌾${fmt(Math.floor(a.farm || 0))}${live}`;
+        });
         const totFarm = list.reduce((s, a) => s + (a.farm || 0), 0);
         const totSol = list.reduce((s, a) => s + (a.sol || 0), 0);
         return send(`👥 <b>Accounts ${list.length}/${max}</b>\n${lines.join('\n')}\n\nTotal: ◎${totSol.toFixed(3)} SOL • 🌾${fmt(Math.floor(totFarm))} $FARM`);
+      }
+      case '/mintsession': {
+        if (!ctx.testMint) return send('🧩 Not available in this build.');
+        await send('🧩 Solving Turnstile + minting a test session…');
+        const r = await ctx.testMint();
+        return send(r.ok
+          ? `🧩 ✅ Captcha + mint OK — fresh anonymous session valid ~${r.expMin ?? '?'} min.\nMulti-account auto-sessions will work. Enable with MULTI_ACCOUNT=on.`
+          : `🧩 ❌ Mint failed: ${esc(r.reason)}\nCheck CAPTCHA_API_KEY / balance.`);
       }
       case '/genwallets': {
         if (!ctx.genWallets) return send('🔑 Multi-account not available in this build.');
@@ -283,7 +295,7 @@ export async function dispatchCommand(text, ctx, send) {
         return send(
           `📖 <b>FarmTown Sentinel</b>\n\n` +
           `<b>INFO</b> /status /balance /farm /inventory /basket /orders /jobs /quests /mastery /stats /pool /economy /wallet\n\n` +
-          `<b>MULTI-ACCOUNT</b> /accounts /genwallets /sweep\n\n` +
+          `<b>MULTI-ACCOUNT</b> /accounts /genwallets /mintsession /sweep\n\n` +
           `<b>CONTROL</b> /start /stop /pause /resume /autopilot /objective /setcrop /reserve /sethours /poolburn\n\n` +
           `<b>ACTIONS</b> /harvest /plant /plantall /buyplot /buyseed /upgradestorage /claimpool /auth /reconnect /restart\n\n` +
           `<b>DIAG</b> /log /ping /help`
