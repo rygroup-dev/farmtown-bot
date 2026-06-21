@@ -139,3 +139,15 @@ test('planStorage picks next tier above current capacity', () => {
   assert.strictEqual(plan.length, 1);
   assert.strictEqual(plan[0].payload.itemId, 'big_storage_crate');
 });
+
+test('planActions buys an adjacent plot when farm is full and gold is high', async () => {
+  const { GameState } = await import('../src/game/state.js');
+  const s = new GameState();
+  s.gold = 5000;
+  // single owned tile that is planted+growing (not ready) → farm "full"
+  s.tiles.set('5,5', { x:5,y:5, ownerState:'owned', groundState:'planted', blocker:'none', cropId:'carrot', readyAt: Date.now()+99999 });
+  s.tiles.set('6,5', { x:6,y:5, ownerState:'locked' }); // adjacent
+  const eco2 = { carrot:{ id:'carrot', seedId:'carrot_seed', cost:20, sell:40, growSeconds:120, deathSeconds:300, xp:4, unlockLevel:1 } };
+  const plan = planActions(s, eco2, { goldReserve: 2000 });
+  assert.ok(plan.some(p => p.kind === 'buyPlot' && p.payload.tileX === 6 && p.payload.tileY === 5));
+});

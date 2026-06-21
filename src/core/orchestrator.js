@@ -21,7 +21,7 @@ export async function runAccount() {
   const eco = loadEconomy();
   const state = new GameState();
   const flags = { running: true, paused: false, autopilot: true, connected: false, forceCrop: null, objective: 'balanced' };
-  const settings = { activeHours: config.activeHours, goldReserve: 150, poolBurnGold: config.pool.burnGold };
+  const settings = { activeHours: config.activeHours, goldReserve: 2000, poolBurnGold: config.pool.burnGold };
   const stats = { started: Date.now(), harvests: 0, plants: 0, goldStart: 0 };
   const manualQueue = [];
 

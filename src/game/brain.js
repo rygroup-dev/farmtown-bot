@@ -29,12 +29,14 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
     }
   }
 
-  // Auto-expand: unlock ONE adjacent buyable plot when we have spare gold and the
-  // farm is fully worked (no empty/grass tiles left). Grows capacity = more profit.
-  const buyable = state.buyableTiles().filter(t => t.ownerState === 'buyable');
-  const farmFull = state.grassEmpty().length === 0 && state.tilledEmpty().length === 0;
-  if (buyable.length && state.gold >= goldReserve && (farmFull || state.gold >= goldReserve * 4)) {
-    const t = buyable[0];
+  // Auto-expand: when the farm is fully worked AND we have spare gold, unlock ONE
+  // adjacent locked plot. New plots arrive "wild" (blockers) → cleared → hoed →
+  // planted by the loops above on later ticks. Grows capacity = more profit.
+  const expandable = state.expandableTiles();
+  const farmFull = state.hoeable().length === 0 && state.tilledEmpty().length === 0
+    && state.readyToHarvest().length === 0 && state.blocked().length === 0;
+  if (expandable.length && farmFull && state.gold >= goldReserve) {
+    const t = expandable[0];
     plan.push({ kind:'buyPlot', event:'plot:buy/request', payload:{ tileX:t.x, tileY:t.y }, meta:null });
   }
   return plan;

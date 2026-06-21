@@ -71,3 +71,15 @@ test('seedCount returns 0 for empty inventory', () => {
   const s = new GameState();
   assert.strictEqual(s.seedCount(), 0);
 });
+
+test('expandableTiles returns only locked tiles adjacent to owned', () => {
+  const s = new GameState();
+  s.apply('farm:state/sync', { tiles: [
+    { x: 5, y: 5, ownerState: 'owned', groundState: 'cleared', blocker: 'none' },
+    { x: 6, y: 5, ownerState: 'locked' },  // adjacent → expandable
+    { x: 5, y: 6, ownerState: 'locked' },  // adjacent → expandable
+    { x: 9, y: 9, ownerState: 'locked' },  // far → not
+  ]});
+  const e = s.expandableTiles().map(t => `${t.x},${t.y}`).sort();
+  assert.deepStrictEqual(e, ['5,6', '6,5']);
+});

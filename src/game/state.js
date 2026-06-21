@@ -62,6 +62,15 @@ export class GameState {
   blocked() { return this.ownedTiles().filter(t => t.blocker && t.blocker !== 'none'); }
   readyToHarvest() { const now = Date.now(); return this.ownedTiles().filter(t => t.cropId && t.readyAt && t.readyAt <= now); }
   buyableTiles() { return [...this.tiles.values()].filter(t => t.ownerState === 'buyable' || t.ownerState === 'locked'); }
+  // Locked tiles orthogonally adjacent to owned land — the only plots you can buy
+  // ("Locked tiles must be adjacent to your owned area"). Server validates the price.
+  expandableTiles() {
+    const owned = new Set(this.ownedTiles().map(t => this.key(t.x, t.y)));
+    return [...this.tiles.values()].filter(t => t.ownerState === 'locked' && (
+      owned.has(this.key(t.x - 1, t.y)) || owned.has(this.key(t.x + 1, t.y)) ||
+      owned.has(this.key(t.x, t.y - 1)) || owned.has(this.key(t.x, t.y + 1))
+    ));
+  }
   completableOrders() {
     return this.orders.filter(o => o.requires && Object.entries(o.requires).every(([c, q]) => (this.cropInventory[c] || 0) >= q));
   }
