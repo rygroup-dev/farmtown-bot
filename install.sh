@@ -93,7 +93,7 @@ if [ "${SKIP_ENV:-0}" != "1" ]; then
   ask TELEGRAM_CHAT_ID   "  → TELEGRAM_CHAT_ID (blank to skip): "
 
   say ""
-  ask DISPLAY_NAME    "  → In-game display name [ohmaygawd]: "
+  ask DISPLAY_NAME    "  → In-game display name [Farmer]: "
   ask WITHDRAW_ADDRESS "  → Your MAIN wallet to withdraw \$FARM to (blank = disabled): "
   ask ACTIVE_HOURS    "  → Active hours, anti-ban sleep window [06:00-23:30, or 24h]: "
 
@@ -105,7 +105,7 @@ API_ORIGIN=https://play.farmtown.online
 REALTIME_URL=https://realtime.farmtown.online
 SUPABASE_URL=https://irarxwyrpmmxacrbvpnz.supabase.co
 SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
-DISPLAY_NAME=${DISPLAY_NAME:-ohmaygawd}
+DISPLAY_NAME=${DISPLAY_NAME:-Farmer}
 ROOM_ID=farmtown-dev
 TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID

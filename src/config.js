@@ -14,7 +14,7 @@ export const config = {
   supabaseUrl: process.env.SUPABASE_URL || 'https://irarxwyrpmmxacrbvpnz.supabase.co',
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
   roomId: process.env.ROOM_ID || 'farmtown-dev',
-  displayName: process.env.DISPLAY_NAME || 'ohmaygawd',
+  displayName: process.env.DISPLAY_NAME || 'Farmer',
   keypair: loadKeypair(process.env.SOLANA_SECRET_KEY),
   telegram: { token: process.env.TELEGRAM_BOT_TOKEN || '', chatId: process.env.TELEGRAM_CHAT_ID || '' },
   activeHours: process.env.ACTIVE_HOURS || '06:00-23:30',

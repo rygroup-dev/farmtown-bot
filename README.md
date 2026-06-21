@@ -80,7 +80,7 @@ truly dies it will message you on Telegram with the same one-liner to re-paste.
 | `SUPABASE_ANON_KEY` | ✅ | FarmTown's public client key. F12 → Network → any `*.supabase.co` request → copy the `apikey` header. |
 | `TELEGRAM_BOT_TOKEN` | ➖ | From [@BotFather](https://t.me/BotFather). Without it, remote control is disabled. |
 | `TELEGRAM_CHAT_ID` | ➖ | Your chat id (from [@userinfobot](https://t.me/userinfobot)). Locks the bot to you. |
-| `DISPLAY_NAME` | ➖ | In-game name. Default `ohmaygawd`. |
+| `DISPLAY_NAME` | ➖ | In-game name. Default `Farmer`. |
 | `ACTIVE_HOURS` | ➖ | Anti-ban sleep window, `HH:MM-HH:MM` or `24h`. Default `06:00-23:30`. |
 | `WITHDRAW_ADDRESS` | ➖ | Your main wallet to withdraw earned `$FARM` to. Blank = withdraw disabled. |
 | `SOLANA_RPC` | ➖ | RPC for `/wallet` balance + withdraw. Default is the public (rate-limited) endpoint. |
