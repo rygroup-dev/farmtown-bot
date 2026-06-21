@@ -89,4 +89,15 @@ export class GameState {
     for (const o of this.orders) for (const [c, q] of Object.entries(o.requires || {})) d[c] = (d[c] || 0) + q;
     return d;
   }
+  // How many of each crop are currently growing on owned tiles, keyed by lowercase
+  // crop id (so it can be netted against order demand). Lets the brain avoid
+  // over-planting a single order crop when enough is already in the ground.
+  growingCounts() {
+    const d = {};
+    for (const t of this.ownedTiles()) if (t.cropId) {
+      const id = String(t.cropId).toLowerCase().replace(/_seed$/, '');
+      d[id] = (d[id] || 0) + 1;
+    }
+    return d;
+  }
 }

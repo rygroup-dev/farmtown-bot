@@ -43,6 +43,7 @@ export const COMMAND_MENU = [
   ['buyseed', '<crop> [qty]'],
   ['upgradestorage', 'Buy next storage tier'],
   ['claimpool', 'Manual pool claim'],
+  ['auth', 'Paste fresh Supabase session to re-login'],
   ['reconnect', 'Force reconnect'],
   ['restart', 'Restart process'],
   ['log', '[n] recent log lines'],
@@ -214,6 +215,22 @@ export async function dispatchCommand(text, ctx, send) {
         if (r.contributed) return send('🏊 <b>Pool Claim</b>\n✅ Contributed claim power — earning $FARM.');
         return send(`🏊 <b>Pool Claim</b>\nℹ️ Not contributed${r.reason ? ` (${esc(r.reason)})` : ''}${r.pool ? ` • pool ${esc(r.pool)}` : ''}${r.level != null ? ` • L${r.level}` : ''}`);
       }
+      case '/auth': {
+        // Everything after "/auth " is the pasted token (use the untrimmed remainder so
+        // a JSON paste survives intact). Token is a secret — only the guarded chat reaches here.
+        const raw = (text || '').replace(/^\s*\/auth(@\S+)?\s*/i, '');
+        if (!raw.trim()) return send(
+          '🔐 <b>Re-login — get your token in 3 steps</b>\n\n' +
+          '1️⃣ Open the game in your browser → press <b>F12</b> → <b>Console</b> tab.\n' +
+          '2️⃣ Paste &amp; run this (it copies the session straight to your clipboard):\n' +
+          '<code>copy(localStorage.getItem(Object.keys(localStorage).find(k=&gt;k.includes(\'auth-token\'))))</code>\n' +
+          '3️⃣ Back here, type <code>/auth </code> then paste (Ctrl/Cmd+V) and send.'
+        );
+        if (!ctx.setAuth) return send('🔐 ❌ Re-login not supported in this build.');
+        const r = ctx.setAuth(raw);
+        if (!r?.ok) return send(`🔐 ❌ Couldn't read that token: ${esc(r?.reason || 'parse failed')}. Paste the full <code>sb-…-auth-token</code> value.`);
+        return send(`🔐 ✅ <b>New session loaded — re-logging in now.</b>\nAccess token valid ~${r.expMin ?? '?'} min${r.hasRefresh ? ' • refresh token saved (auto-renews) 🔁' : ' • ⚠️ no refresh token included → will need another /auth at expiry'}.\nWatch for 🟢/✅ when it joins.`);
+      }
       case '/reconnect': ctx.manual('reconnect'); return send('🔌 Reconnect queued.');
       case '/restart': await send('🔄 Restart queued.'); ctx.manual('restart'); return;
 
@@ -229,7 +246,7 @@ export async function dispatchCommand(text, ctx, send) {
           `📖 <b>FarmTown Sentinel</b>\n\n` +
           `<b>INFO</b> /status /balance /farm /inventory /basket /orders /jobs /quests /mastery /stats /pool /economy /wallet\n\n` +
           `<b>CONTROL</b> /start /stop /pause /resume /autopilot /objective /setcrop /reserve /sethours /poolburn\n\n` +
-          `<b>ACTIONS</b> /harvest /plant /plantall /buyplot /buyseed /upgradestorage /claimpool /reconnect /restart\n\n` +
+          `<b>ACTIONS</b> /harvest /plant /plantall /buyplot /buyseed /upgradestorage /claimpool /auth /reconnect /restart\n\n` +
           `<b>DIAG</b> /log /ping /help`
         );
 

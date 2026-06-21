@@ -28,6 +28,42 @@ function jwtExp(token) { try { return JSON.parse(Buffer.from(token.split('.')[1]
 export function supabaseExpiringSoon(session, skewMs = 120000) {
   return jwtExp(session.access_token) - Date.now() < skewMs;
 }
+
+// The walletSessionToken is a `payload.signature` token; payload (part 0) carries
+// iat/exp in MILLISECONDS. We can reuse the existing wallet session across reconnects
+// until it's near expiry — avoids re-hitting the slow /api/auth/wallet/verify endpoint
+// on every reconnect (faster, more resilient to server degradation, less auth churn).
+export function walletSessionExpMs(token) {
+  try {
+    const b64 = String(token).split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
+    const p = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+    return Number(p.exp) || 0; // already ms
+  } catch { return 0; }
+}
+export function walletSessionExpiringSoon(session, skewMs = 300000) {
+  const exp = walletSessionExpMs(session?.walletSessionToken);
+  return !exp || exp - Date.now() < skewMs;
+}
+
+// Parse whatever the user pastes into Telegram: the full Supabase localStorage JSON
+// (`{access_token, refresh_token, ...}` or `{currentSession:{...}}`), an older array
+// form `[access_token, refresh_token]`, or a bare access_token JWT. Returns
+// { access_token, refresh_token? } (refresh_token optional).
+export function parseSupabaseSession(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return {};
+  let obj = null;
+  try { obj = JSON.parse(text); } catch { /* not JSON */ }
+  if (obj) {
+    if (Array.isArray(obj)) return { access_token: obj[0], refresh_token: obj[1] };
+    if (obj.access_token) return { access_token: obj.access_token, refresh_token: obj.refresh_token };
+    if (obj.currentSession?.access_token) return { access_token: obj.currentSession.access_token, refresh_token: obj.currentSession.refresh_token };
+    if (obj.session?.access_token) return { access_token: obj.session.access_token, refresh_token: obj.session.refresh_token };
+  }
+  // A bare JWT (access_token only — refresh will be missing, but works until exp).
+  if (/^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(text)) return { access_token: text };
+  return {};
+}
 export async function keepWalletSessionAlive(rest) {
   const r = await rest.req('/api/auth/session');
   return r.status === 200 && r.json?.gameplayAllowed === true;

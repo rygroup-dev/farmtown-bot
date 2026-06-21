@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { config, walletAddress } from '../config.js';
 import { log } from '../logger.js';
 import { Rest } from '../net/rest.js';
-import { loadSession, saveSession, refreshSupabase, supabaseExpiringSoon, keepWalletSessionAlive } from '../auth/session.js';
+import { loadSession, saveSession, refreshSupabase, supabaseExpiringSoon, keepWalletSessionAlive, walletSessionExpiringSoon, parseSupabaseSession } from '../auth/session.js';
 import { bootstrapSession } from '../auth/bootstrap.js';
 import { bindWallet, walletSessionPlayerId } from '../auth/wallet.js';
 import { GameSocket } from '../net/socket.js';
@@ -71,6 +71,25 @@ export async function runAccount() {
     withdrawAddress: config.withdrawAddress,
     starBundles: async () => { const r = await rest.req('/api/token/stars/bundles', { timeoutMs: 20000 }); return r.json?.bundles || []; },
     manual: (kind, arg) => manualQueue.push({ kind, arg }),
+    // Paste a fresh Supabase session from Telegram → write it + force an immediate
+    // re-login. Lets the user recover from a truly-dead refresh token in ~10s without
+    // touching files. Accepts the full localStorage JSON, {access_token,...}, or a JWT.
+    setAuth: (raw) => {
+      const p = parseSupabaseSession(raw);
+      if (!p.access_token) return { ok: false, reason: 'no access_token found in pasted value' };
+      session.access_token = p.access_token;
+      if (p.refresh_token) session.refresh_token = p.refresh_token;
+      session.obtainedAt = Date.now();
+      saveSession(session);
+      authFailStreak = 0; degraded = false;
+      flags.running = true;
+      reconnecting = false; reconnectAttempt = 0;
+      try { gs?.close(); } catch {}
+      scheduleReconnect('manual-auth');
+      let expMin = null;
+      try { expMin = Math.round((JSON.parse(Buffer.from(p.access_token.split('.')[1], 'base64').toString('utf8')).exp * 1000 - Date.now()) / 60000); } catch {}
+      return { ok: true, hasRefresh: !!p.refresh_token, expMin };
+    },
     setConfig: (key, val) => {
       if (key === 'activeHours') settings.activeHours = val;
       else if (key === 'goldReserve') settings.goldReserve = Number(val) || settings.goldReserve;
@@ -81,14 +100,22 @@ export async function runAccount() {
     },
   });
 
-  // Re-auth so every (re)connect uses fresh tokens (supabase ~1h, walletSession ~30m).
+  // Re-auth on (re)connect. Refresh Supabase only when its JWT is near expiry, and
+  // REUSE the existing wallet session token until it's near its own 30-min expiry —
+  // this avoids hammering the slow /api/auth/wallet/verify endpoint on every reconnect
+  // (much more resilient when the server is degraded, and less auth churn = anti-ban).
   async function reauth() {
     if (supabaseExpiringSoon(session)) await refreshSupabase(session, rest);
     rest.setBearer(session.access_token);
-    const v = await bindWallet(rest);
-    session.walletSessionToken = v.walletSessionToken;
-    rest.setWalletSession(v.walletSessionToken);
-    saveSession(session);
+    if (walletSessionExpiringSoon(session)) {
+      const v = await bindWallet(rest);
+      session.walletSessionToken = v.walletSessionToken;
+      saveSession(session);
+      log.info('AUTH', 're-verified wallet (session was expiring)');
+    } else {
+      log.info('AUTH', 'reusing valid wallet session (skip verify)');
+    }
+    rest.setWalletSession(session.walletSessionToken);
   }
 
   let gs, runner, lastStateLog = 0, reconnecting = false, lastActionAt = Date.now(), lastSnapshotAt = 0;
@@ -111,11 +138,20 @@ export async function runAccount() {
       if (now - lastQueueLog >= 15000) { lastQueueLog = now; log.info('QUEUE', `position ${d.position} (online ${d.online}/${d.capacity})`); }
       if (!queuedNotified) { queuedNotified = true; tg.notify(`⏳ in queue — position ${d.position}, joining automatically`); }
     });
-    gs.on('joined', () => { flags.connected = true; reconnecting = false; reconnectAttempt = 0; lastActionAt = Date.now(); gs.refreshSnapshot(); log.info('JOINED', 'farm gold=' + state.gold + ' level=' + state.level + ' owned=' + state.ownedTiles().length); tg.notify('🟢 joined farm — level ' + state.level + ' gold ' + state.gold); });
+    gs.on('joined', () => {
+      flags.connected = true; reconnecting = false; reconnectAttempt = 0; lastActionAt = Date.now(); gs.refreshSnapshot();
+      log.info('JOINED', 'farm gold=' + state.gold + ' level=' + state.level + ' owned=' + state.ownedTiles().length);
+      // If we were in a sustained outage, announce RECOVERY clearly (once). Otherwise a normal join.
+      if (degraded) { degraded = false; tg.notify('✅ <b>SERVER RECOVERED</b> — farming resumed.\nLevel ' + state.level + ' • gold ' + state.gold); }
+      else tg.notify('🟢 joined farm — level ' + state.level + ' gold ' + state.gold);
+    });
     gs.on('down', (reason) => { flags.connected = false; scheduleReconnect(reason); });
   }
 
-  let reconnectAttempt = 0, authFailStreak = 0;
+  // After this many consecutive failed reconnects (~2-3 min of exponential backoff),
+  // treat it as a server-side degradation/maintenance window and alert the user ONCE.
+  const DEGRADED_THRESHOLD = 4;
+  let reconnectAttempt = 0, authFailStreak = 0, degraded = false;
   async function scheduleReconnect(reason) {
     if (reconnecting || !flags.running) return;
     reconnecting = true;
@@ -125,7 +161,18 @@ export async function runAccount() {
     const backoff = Math.min(2000 * 2 ** reconnectAttempt, 30000) + gaussianDelay(500, 2500);
     reconnectAttempt++;
     log.warn('WS', `down (${reason}) — reconnect in ${Math.round(backoff / 1000)}s (attempt ${reconnectAttempt})`);
-    tg.notify('🔴 disconnected — reconnecting');
+    // Notify ONCE on the first drop — never on every retry (avoids 30+ msg spam in an outage).
+    if (reconnectAttempt === 1) tg.notify('🔴 Disconnected — reconnecting…');
+    // Sustained failure = server-side degradation/maintenance. One clear alert with guidance.
+    if (reconnectAttempt === DEGRADED_THRESHOLD && !degraded) {
+      degraded = true;
+      tg.notify(
+        '🟠 <b>SERVER DEGRADED / MAINTENANCE</b>\n' +
+        `Can't hold a connection after ${reconnectAttempt} tries — the game API/auth is slow or down <b>server-side</b>, not the bot.\n\n` +
+        '• Safe to <b>/stop</b> now and <b>/start</b> later.\n' +
+        "• Or leave it running — I'll keep retrying and send ✅ when the server recovers."
+      );
+    }
     await sleep(backoff);
     if (!flags.running) { reconnecting = false; return; }
     try {
@@ -134,10 +181,19 @@ export async function runAccount() {
       authFailStreak = 0;
     } catch (e) {
       log.error('RECONNECT', e.message + ' — retrying');
-      // If auth keeps failing (refresh_token dead + access_token expired), the pasted
-      // Supabase session is gone — tell the user to re-paste (once, not spammy).
-      if (/challenge failed: 401|verify failed|refresh/i.test(e.message) && ++authFailStreak === 5) {
-        tg.notify('⚠️ <b>Session expired</b> — bot can\'t re-auth. Please paste a fresh Supabase session (incognito → localStorage auth-token) so I can resume.');
+      // Only cry "session expired" on a GENUINE auth rejection (real 401 / invalid_grant /
+      // wallet-not-verified). A timeout ("verify failed: null", "aborted") is server
+      // degradation, NOT a dead token — handled by the DEGRADED alert above. This avoids
+      // the false "re-paste your session" alarm during a slow-server window.
+      const realAuthFail = /challenge failed: 401|invalid_grant|WALLET_NOT_VERIFIED|verify failed: \{.*(invalid|expired|unauthor)/i.test(e.message)
+        && !/timeout|aborted|: null/i.test(e.message);
+      if (realAuthFail && ++authFailStreak === 3) {
+        tg.notify(
+          '⚠️ <b>Session expired</b> — bot can\'t re-auth (real auth rejection). Re-login in 10s:\n\n' +
+          '1️⃣ Open the game → <b>F12</b> → <b>Console</b>, run this (copies token to clipboard):\n' +
+          '<code>copy(localStorage.getItem(Object.keys(localStorage).find(k=&gt;k.includes(\'auth-token\'))))</code>\n' +
+          '2️⃣ Send <code>/auth </code> then paste it. I\'ll auto-login + resume.'
+        );
       }
     } finally {
       // ALWAYS release the guard so the next 'down' can schedule another attempt.
