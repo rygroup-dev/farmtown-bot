@@ -24,7 +24,11 @@ export function decideContribution(status, { burnGold = false, goldReserve = 100
   const cfg = status?.config, pool = status?.pool, player = status?.player;
   if (!cfg?.enabled) return null;
   if (!pool || pool.status !== 'active') return null;
-  if ((player?.level || 0) < (cfg.minLevel || 10)) return null;
+  // Eligibility: trust the server's `unlocked` flag (authoritative). The pool's
+  // player.level can be a STALE cached value (observed level 2 while xp says L11),
+  // so don't gate on it when the server already reports unlocked.
+  const eligible = player?.unlocked === true || (player?.level || 0) >= (cfg.minLevel || 10);
+  if (!eligible) return null;
   if (player.hasContributionToday) return null;
   const farmPointsToBurn = Math.max(0, player.availableFarmPoints || 0);
   const goldToBurn = burnGold && player.gold > goldReserve ? player.gold - goldReserve : 0;
