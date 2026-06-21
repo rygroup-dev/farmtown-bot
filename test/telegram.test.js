@@ -88,8 +88,8 @@ test('/pool reads real status fields (poolDate, totalTokensAllocatedRaw, unlocke
   const m = msgs[0];
   assert.match(m, /active/);
   assert.match(m, /2026-06-21/);
-  assert.match(m, /4,400,000/); // 4.4e12 / 1e6
-  assert.match(m, /✅ yes/);    // unlocked
+  assert.match(m, /4,400,000/);   // 4.4e12 / 1e6
+  assert.match(m, /✅ eligible/);  // unlocked
 });
 
 test('/log HTML-escapes special chars (no broken markup)', async () => {

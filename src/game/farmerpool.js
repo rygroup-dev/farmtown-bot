@@ -18,8 +18,21 @@ export async function pollFarmerPool(rest) {
   return r.status === 200 ? r.json : null;
 }
 
-// Pure decision. Defaults are conservative: spend only farm points (a free byproduct
-// of playing); never burn gold (needed for farming) or levels unless explicitly enabled.
+// Pure decision — the bot's pool strategy, encoded.
+//
+// Economics (reverse-engineered): the daily pool (~4.4M FARM) is split by each player's
+// share of total "claim power". Power is bought by burning one of three things:
+//   • farm points — 100 FP = 1 power. A FREE byproduct of farming → always burn.
+//   • gold        — 250k gold = 1 power. Has farming utility → only burn true surplus.
+//   • levels      — 1 level = 3 power, but ~$0.06 each and DESTRUCTIVE (drops crop
+//                   unlocks → worse income). A trap. NEVER burn unless explicitly opted in.
+//
+// Two correctness rules baked in:
+//   1) Contribute REPEATEDLY (top players do 150-260x/day) — share is the TOTAL power
+//      accumulated over the day, so we never stop after the first contribution.
+//   2) Burn only in WHOLE-power multiples (exactly like the game UI's power sliders) so
+//      no farm points or gold are ever wasted on sub-power rounding; the remainder
+//      (<1 power) is kept and accumulates for the next contribution.
 export function decideContribution(status, { burnGold = false, goldReserve = 100000, burnLevels = false } = {}) {
   const cfg = status?.config, pool = status?.pool, player = status?.player;
   if (!cfg?.enabled) return null;
@@ -29,11 +42,16 @@ export function decideContribution(status, { burnGold = false, goldReserve = 100
   // so don't gate on it when the server already reports unlocked.
   const eligible = player?.unlocked === true || (player?.level || 0) >= (cfg.minLevel || 10);
   if (!eligible) return null;
-  if (player.hasContributionToday) return null;
-  const farmPointsToBurn = Math.max(0, player.availableFarmPoints || 0);
-  const goldToBurn = burnGold && player.gold > goldReserve ? player.gold - goldReserve : 0;
+
+  const fpPer = cfg.farmPointsPerPower || 100;
+  const goldPer = cfg.goldPerPower || 250000;
+  const floorTo = (amount, unit) => Math.max(0, Math.floor(amount / unit) * unit);
+
+  const farmPointsToBurn = floorTo(player.availableFarmPoints || 0, fpPer);
+  const goldToBurn = burnGold ? floorTo(Math.max(0, (player.gold || 0) - goldReserve), goldPer) : 0;
   const levelsToBurn = burnLevels ? Math.max(0, player.burnableLevels || 0) : 0;
-  if (farmPointsToBurn + goldToBurn + levelsToBurn <= 0) return null;
+
+  if (farmPointsToBurn + goldToBurn + levelsToBurn <= 0) return null; // nothing worth a whole power yet
   return { farmPointsToBurn, goldToBurn, levelsToBurn };
 }
 

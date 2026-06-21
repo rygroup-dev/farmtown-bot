@@ -246,12 +246,25 @@ export async function runAccount() {
 
   // Farmer's Pool earn loop: once at L10+ and the daily pool is open, contribute claim
   // power (farm points by default; gold only if POOL_BURN_GOLD=on) to earn $FARM.
+  // Contribute repeatedly (~every 10 min ≈ 144x/day, in line with top players) so our
+  // share keeps climbing. Notify only the FIRST contribution per pool-open + a periodic
+  // summary — never every cycle (would spam). Resets when the pool isn't active.
+  let poolNotified = false, poolLastSummary = 0;
   (async function farmerPoolLoop() {
     while (flags.running) {
       await sleep(gaussianDelay(540000, 660000)); // ~10 min
       if (!config.pool.enabled || !flags.connected || state.level < 10) continue;
       const r = await maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve });
-      if (r?.contributed) tg.notify(`💎 Farmer's Pool: contributed claim power — earning $FARM`);
+      if (r?.contributed) {
+        const now = Date.now();
+        if (!poolNotified) { poolNotified = true; poolLastSummary = now; tg.notify("💎 Farmer's Pool is open — auto-contributing free farm points to earn $FARM. /pool for details."); }
+        else if (now - poolLastSummary > 7200000) { // ~2h summary
+          poolLastSummary = now;
+          try { const st = await pollFarmerPool(rest); const me = st?.player; if (me) tg.notify(`💎 Pool today: power ${me.contributedClaimPowerToday || 0} • est. payout ${(Number(me.estimatedPayoutRaw || 0) / 1e6).toFixed(2)} $FARM`); } catch {}
+        }
+      } else if (r?.pool && r.pool !== 'active') {
+        poolNotified = false; // pool closed/paused → re-announce when it next opens
+      }
     }
   })();
 

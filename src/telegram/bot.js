@@ -134,16 +134,23 @@ export async function dispatchCommand(text, ctx, send) {
         const p = await ctx.pool();
         if (!p) return send('🏊 <b>Farmer Pool</b>\nStatus unavailable (server slow / not logged in).');
         const pool = p.pool || {}, player = p.player || {}, cfg = p.config || {};
+        const sym = cfg.tokenSymbol || 'FARM';
+        const px = Number(p.tokenUsdPrice || 0);
         const farmDay = Number(pool.totalTokensAllocatedRaw || 0) / 1e6;
         const payout = Number(player.estimatedPayoutRaw || 0) / 1e6;
         const unlocked = player.unlocked || (player.level || 0) >= (cfg.minLevel || 10);
+        const perPower = pool.totalClaimPower > 0 ? farmDay / pool.totalClaimPower : 0;
+        const usd = (farm) => px > 0 ? ` (~$${(farm * px).toFixed(2)})` : '';
+        const fpPower = Math.floor((player.availableFarmPoints || 0) / (cfg.farmPointsPerPower || 100));
         return send(
-          `🏊 <b>Farmer Pool</b> ($${cfg.tokenSymbol || 'FARM'})\n` +
+          `🏊 <b>Farmer Pool</b> ($${sym})\n` +
           `Status: <b>${esc(pool.status || 'unknown')}</b> • Date: ${esc(pool.poolDate || 'n/a')}\n` +
-          `Pool/day: ${fmt(farmDay)} ${cfg.tokenSymbol || 'FARM'} • Participants: ${fmt(pool.activeParticipantCount)}\n` +
-          `You: L${fmt(player.level)} • farm points ${fmt(player.availableFarmPoints)} • gold ${fmt(player.gold)}\n` +
-          `Eligible: ${unlocked ? '✅ yes' : `🔒 needs L${cfg.minLevel || 10}`} • contributed today: ${player.hasContributionToday ? 'yes' : 'no'}\n` +
-          `Est. payout: ${payout.toFixed(4)} ${cfg.tokenSymbol || 'FARM'}`
+          `Pool/day: ${fmt(farmDay)} ${sym}${usd(farmDay)} • Farmers: ${fmt(pool.activeParticipantCount)}\n` +
+          `Price: $${px ? px.toFixed(6) : '?'} • Value/power: ${perPower.toFixed(2)} ${sym}${usd(perPower)}\n` +
+          `\n<b>You</b> — L${fmt(player.level)} • ${unlocked ? '✅ eligible' : `🔒 needs L${cfg.minLevel || 10}`}\n` +
+          `Farm points: ${fmt(player.availableFarmPoints)} (= ${fpPower} power ready, free)\n` +
+          `Power today: ${fmt(player.contributedClaimPowerToday)} • Est. payout: ${payout.toFixed(2)} ${sym}${usd(payout)}\n` +
+          `\n<i>Strategy: auto-burns free farm points every ~10 min. Gold burn: /poolburn on (surplus only). Levels are never sacrificed (bad value).</i>`
         );
       }
       case '/economy':
