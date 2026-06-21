@@ -30,6 +30,9 @@ export class GameSocket extends EventEmitter {
     this.socket.on('connect', () => {
       log.info('WS', 'connected ' + this.socket.id);
       this.startPing();
+      // Proactively attempt to join after connect — degraded servers sometimes don't
+      // emit serverNotice/queue:ready, leaving us connected-but-never-joined.
+      setTimeout(() => { if (!this.ready && this.socket?.connected) this.join(); }, 2500);
     });
 
     this.socket.on('queue:update', (d) => this.emit('queue', d));
