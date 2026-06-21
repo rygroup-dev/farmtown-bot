@@ -174,7 +174,7 @@ export async function runAccount(account = {}) {
   }
 
   let gs, runner, lastStateLog = 0, reconnecting = false, lastActionAt = Date.now(), lastSnapshotAt = 0;
-  let lastEventAt = Date.now(), reconnectingSince = 0;
+  let lastEventAt = Date.now(), reconnectingSince = 0, joinNotifyPending = null;
   function connect() {
     gs = new GameSocket({ accessToken: session.access_token, walletSessionToken: session.walletSessionToken, displayName, persistentPlayerId: session.persistentPlayerId }).connect();
     runner = new ActionRunner(gs);
@@ -182,6 +182,14 @@ export async function runAccount(account = {}) {
       lastEventAt = Date.now();
       state.apply(ev, data);
       if (ev === 'player:farmState/sync' && !stats.goldStart) stats.goldStart = state.gold;
+      // Send the join/recovery notification only AFTER the farm state has synced, so it
+      // reports the REAL level/gold (not the level-1/gold-0 defaults at the join instant)
+      // and is clearly labelled per account (important once multi-account is running).
+      if (ev === 'player:farmState/sync' && joinNotifyPending) {
+        const kind = joinNotifyPending; joinNotifyPending = null;
+        if (kind === 'recovered') tg.notify(`${tag}✅ <b>SERVER BACK UP</b> — auto-rejoined.\nLevel ${state.level} • gold ${state.gold}`);
+        else tg.notify(`${tag}🟢 joined farm — level ${state.level} • gold ${state.gold}`);
+      }
       if (ev === 'game:actionResult' && data.ok) log.info('ACT', (data.type || '?') + ' ok' + (data.message ? (' — ' + data.message) : ''));
       if (ev === 'game:error' || ev === 'farm:error') log.warn('GAMEERR', (data.code || '?') + ' ' + (data.message || ''));
       if (ev === 'game:actionResult' && data.ok) lastActionAt = Date.now();
@@ -198,10 +206,10 @@ export async function runAccount(account = {}) {
       flags.connected = true; reconnecting = false; reconnectAttempt = 0; lastActionAt = Date.now(); gs.refreshSnapshot();
       log.info('JOINED', 'farm gold=' + state.gold + ' level=' + state.level + ' owned=' + state.ownedTiles().length);
       if (!firstJoin) return;
-      // If we were in a sustained outage, announce RECOVERY clearly (once). Otherwise a normal join.
-      // Either way the user ALWAYS gets a "server is up / I'm back in" ping on every (re)join.
-      if (degraded) { degraded = false; tg.notify('✅ <b>SERVER BACK UP</b> — auto-rejoined, farming resumed.\nLevel ' + state.level + ' • gold ' + state.gold); }
-      else tg.notify('🟢 joined farm — level ' + state.level + ' gold ' + state.gold);
+      // Defer the actual notification to the first farmState/sync (real level/gold).
+      // The user ALWAYS gets a labelled "server up / back in" ping per (re)join.
+      joinNotifyPending = degraded ? 'recovered' : 'joined';
+      degraded = false;
     });
     gs.on('down', (reason) => { flags.connected = false; scheduleReconnect(reason); });
   }
