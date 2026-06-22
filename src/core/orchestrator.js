@@ -51,9 +51,21 @@ export async function runAccount(account = {}) {
     if (supabaseExpiringSoon(session)) await refreshSupabase(session, rest);
     if (session.cookieHeader) rest.setCookie(session.cookieHeader);
     rest.setBearer(session.access_token);
-    const v = await bindWallet(rest, keypair);
-    session.walletSessionToken = v.walletSessionToken;
-    rest.setWalletSession(session.walletSessionToken); // x-farmtown-wallet-session header
+    let v;
+    if (session.walletSessionToken && !walletSessionExpiringSoon(session)) {
+      // REUSE a still-valid persisted wallet session (30-min life) on boot instead of
+      // ALWAYS hammering the slow /api/auth/wallet/verify. That heavy endpoint is the
+      // one that degrades server-side; binding it on every (re)start would block the
+      // whole fleet (subs are gated behind main's boot) whenever it's slow. Mirrors
+      // reauth() — falls back to a fresh bind only when the session is absent/expiring.
+      rest.setWalletSession(session.walletSessionToken); // x-farmtown-wallet-session header
+      log.info('AUTH', tag + 'reusing valid wallet session on boot (skip verify)');
+      v = { walletSessionToken: session.walletSessionToken };
+    } else {
+      v = await bindWallet(rest, keypair);
+      session.walletSessionToken = v.walletSessionToken;
+      rest.setWalletSession(session.walletSessionToken); // x-farmtown-wallet-session header
+    }
     session.persistentPlayerId = walletSessionPlayerId(session.walletSessionToken) || session.persistentPlayerId || crypto.randomUUID();
     // Set the in-game display name server-side (best-effort).
     try { await rest.req('/api/auth/profile', { method: 'POST', retries: 0, timeoutMs: 20000, body: { displayName } }); } catch {}
@@ -266,10 +278,16 @@ export async function runAccount(account = {}) {
       reconnecting = false;
       reconnectingSince = 0;
     }
-    if (!flags.connected && flags.running && !gs?.socket?.connected) {
-      // no socket alive after this attempt → ensure another try is scheduled
-      setTimeout(() => scheduleReconnect('retry'), 5000);
-    }
+    // The socket connects + joins ASYNCHRONOUSLY (~2.5s after connect()). Re-check
+    // connectivity 5s LATER inside the callback — NOT synchronously here, where
+    // flags.connected is always still false (join hasn't happened yet), which would
+    // schedule a guaranteed reconnect on EVERY healthy socket and cause a ~5s
+    // self-disconnect loop per engine. Only force another attempt if STILL not connected.
+    setTimeout(() => {
+      if (!flags.connected && flags.running && !reconnecting && !gs?.socket?.connected) {
+        scheduleReconnect('retry');
+      }
+    }, 5000);
   }
   connect();
 
