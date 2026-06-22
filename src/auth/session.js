@@ -64,6 +64,16 @@ export function walletSessionExpiringSoon(session, skewMs = 300000) {
   return !exp || exp - Date.now() < skewMs;
 }
 
+// The WS gateway can reject a wallet session that is still locally-unexpired but has been
+// invalidated server-side (e.g. after the 2026-06 update) with a
+// `connect_error: Wallet verification required` (REST equivalent: WALLET_NOT_VERIFIED).
+// When a reconnect `down` reason matches this, the reconnect path MUST force a fresh
+// bindWallet — reusing the (locally-valid) dead token just loops forever. This is the
+// one signal that overrides the local expiry heuristic.
+export function walletReverifyRequired(reason) {
+  return /wallet[\s_-]*(verification[\s_-]*required|not[\s_-]*verified)/i.test(String(reason || ''));
+}
+
 // Parse whatever the user pastes into Telegram: the full Supabase localStorage JSON
 // (`{access_token, refresh_token, ...}` or `{currentSession:{...}}`), an older array
 // form `[access_token, refresh_token]`, or a bare access_token JWT. Returns

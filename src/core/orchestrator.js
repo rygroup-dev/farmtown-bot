@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { config, walletAddress } from '../config.js';
 import { log } from '../logger.js';
 import { Rest } from '../net/rest.js';
-import { loadSession, saveSession, refreshSupabase, supabaseExpiringSoon, keepWalletSessionAlive, walletSessionExpiringSoon, parseSupabaseSession, mintSession } from '../auth/session.js';
+import { loadSession, saveSession, refreshSupabase, supabaseExpiringSoon, keepWalletSessionAlive, walletSessionExpiringSoon, walletReverifyRequired, parseSupabaseSession, mintSession } from '../auth/session.js';
 import { captchaEnabled } from '../auth/captcha.js';
 import { bootstrapSession } from '../auth/bootstrap.js';
 import { bindWallet, walletSessionPlayerId } from '../auth/wallet.js';
@@ -174,11 +174,17 @@ export async function runAccount(account = {}) {
   async function reauth() {
     if (supabaseExpiringSoon(session)) await refreshSupabase(session, rest);
     rest.setBearer(session.access_token);
-    if (walletSessionExpiringSoon(session)) {
+    // The WS gateway's explicit "Wallet verification required" rejection OVERRIDES the
+    // local expiry heuristic: a locally-unexpired token the server no longer honors would
+    // otherwise be reused forever (infinite reconnect loop). When forced, re-bind even
+    // though walletSessionExpiringSoon() still says the token is fine.
+    if (forceWalletReverify || walletSessionExpiringSoon(session)) {
       const v = await bindWallet(rest, keypair);
       session.walletSessionToken = v.walletSessionToken;
+      session.persistentPlayerId = walletSessionPlayerId(session.walletSessionToken) || session.persistentPlayerId;
       sessionStore.save(session);
-      log.info('AUTH', tag + 're-verified wallet (session was expiring)');
+      log.info('AUTH', tag + (forceWalletReverify ? 're-verified wallet (server rejected session)' : 're-verified wallet (session was expiring)'));
+      forceWalletReverify = false;
     } else {
       log.info('AUTH', tag + 'reusing valid wallet session (skip verify)');
     }
@@ -229,9 +235,12 @@ export async function runAccount(account = {}) {
   // After this many consecutive failed reconnects (~2-3 min of exponential backoff),
   // treat it as a server-side degradation/maintenance window and alert the user ONCE.
   const DEGRADED_THRESHOLD = 4;
-  let reconnectAttempt = 0, authFailStreak = 0, degraded = false;
+  let reconnectAttempt = 0, authFailStreak = 0, degraded = false, forceWalletReverify = false;
   async function scheduleReconnect(reason) {
     if (reconnecting || !flags.running) return;
+    // Server says the wallet session is invalid (not just a transient drop) → force the
+    // next reauth() to re-bind the wallet instead of reusing the locally-unexpired token.
+    if (walletReverifyRequired(reason)) forceWalletReverify = true;
     reconnecting = true;
     reconnectingSince = Date.now();
     flags.connected = false;
