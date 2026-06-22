@@ -5,7 +5,6 @@ import { log } from '../logger.js';
 import { Rest } from '../net/rest.js';
 import { loadSession, saveSession, refreshSupabase, supabaseExpiringSoon, keepWalletSessionAlive, walletSessionExpiringSoon, walletReverifyRequired, supabaseRemintRequired, parseSupabaseSession, mintSession } from '../auth/session.js';
 import { captchaEnabled } from '../auth/captcha.js';
-import { bootstrapSession } from '../auth/bootstrap.js';
 import { bindWallet, walletSessionPlayerId } from '../auth/wallet.js';
 import { subSessionStore, hasSubSession } from '../sub_sessions.js';
 import { GameSocket } from '../net/socket.js';
@@ -41,9 +40,29 @@ export async function runAccount(account = {}) {
   const reg = registry || new Map(); // shared engine registry (for /accounts); main owns it
 
   let session = sessionStore.load();
-  // No session yet? AUTO-MINT one via captcha (gas-only multi-account) — else fall back to
-  // the one-time browser bootstrap (main account when no captcha key is configured).
-  if (!session) session = captchaEnabled() ? await mintSession(rest) : await bootstrapSession();
+  // No session yet?
+  //  • CAPTCHA_API_KEY set → auto-mint an anonymous session (gas-only multi-account).
+  //  • otherwise (main, no captcha) → the browser bootstrap is ALWAYS Turnstile-blocked,
+  //    so don't crash on it. Wait for the user to supply a session: paste it into
+  //    data/session.json (browser F12 one-liner) or via Telegram /auth. Poll until present,
+  //    then continue normally. This makes a fresh install come up cleanly instead of FATAL.
+  if (!session) {
+    if (captchaEnabled()) {
+      session = await mintSession(rest);
+    } else if (isMain) {
+      log.warn('AUTH', 'No Supabase session and no CAPTCHA_API_KEY. To log in: paste your session into '
+        + config.sessionFile + ' (browser F12 one-liner) or via Telegram /auth — or set CAPTCHA_API_KEY in .env to auto-mint. Waiting for a session…');
+      let waited = 0;
+      while (flags.running && !(session = sessionStore.load())) {
+        if (waited % 60 === 0) log.info('AUTH', 'still waiting for a session (paste into ' + config.sessionFile + ' or send /auth)…');
+        await sleep(5000); waited += 5;
+      }
+      if (!session) return; // stopped before a session arrived
+      log.info('AUTH', 'session detected — continuing boot');
+    } else {
+      throw new Error(tag + 'sub-account needs CAPTCHA_API_KEY to auto-mint a session');
+    }
+  }
 
   // Keep the Supabase access token usable. Refresh when near expiry; if the refresh fails
   // (refresh_token rotated/dead — typically after a restart), MINT a fresh anonymous session
