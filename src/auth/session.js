@@ -74,6 +74,14 @@ export function walletReverifyRequired(reason) {
   return /wallet[\s_-]*(verification[\s_-]*required|not[\s_-]*verified)/i.test(String(reason || ''));
 }
 
+// The WS gateway rejected the Supabase access token (e.g. refresh_token rotated out from
+// under us across a restart, so the persisted token is dead). Like walletReverifyRequired,
+// this server verdict OVERRIDES the local expiry heuristic so reauth() re-mints a fresh
+// session via captcha instead of reusing the dead token forever (infinite reconnect loop).
+export function supabaseRemintRequired(reason) {
+  return /invalid\s+supabase\s+access\s+token|invalid_grant|jwt\s+expired|invalid\s+jwt/i.test(String(reason || ''));
+}
+
 // Parse whatever the user pastes into Telegram: the full Supabase localStorage JSON
 // (`{access_token, refresh_token, ...}` or `{currentSession:{...}}`), an older array
 // form `[access_token, refresh_token]`, or a bare access_token JWT. Returns
