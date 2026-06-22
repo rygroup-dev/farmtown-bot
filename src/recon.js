@@ -1,5 +1,5 @@
-// recon.js — pakai cookie sesi asli untuk discover protokol FarmTown.
-// Jalankan: npm run recon   (setelah isi .env: FARMTOWN_COOKIE, optional FARMTOWN_BEARER)
+// recon.js — use a real session cookie to inspect the FarmTown protocol.
+// Run: npm run recon   (after filling .env: FARMTOWN_COOKIE, optional FARMTOWN_BEARER)
 import 'dotenv/config';
 import { io } from 'socket.io-client';
 import fs from 'node:fs';
@@ -16,7 +16,7 @@ const log = (tag, obj) => {
   fs.appendFileSync('captures/recon.log', line + '\n');
 };
 
-if (!COOKIE) { console.error('❌ Isi FARMTOWN_COOKIE di .env dulu (copy semua cookie dari browser).'); process.exit(1); }
+if (!COOKIE) { console.error('❌ Set FARMTOWN_COOKIE in .env first (copy all cookies from your browser).'); process.exit(1); }
 
 const headers = () => {
   const h = { 'Content-Type': 'application/json', Cookie: COOKIE, Origin: ORIGIN,
@@ -38,12 +38,12 @@ async function api(path, { method = 'GET', body } = {}) {
 (async () => {
   log('RECON', 'start');
 
-  // 1) Identitas & token
+  // 1) Identity & token
   const sess = await api('/api/auth/session');
-  // coba auto-extract bearer dari session kalau ada
+  // try to auto-extract the bearer from the session if present
   const guess = sess.json?.accessToken || sess.json?.token || sess.json?.session?.access_token
     || sess.json?.walletSessionToken;
-  if (!BEARER && guess) { BEARER = guess; log('AUTH', 'bearer ditemukan dari /api/auth/session'); }
+  if (!BEARER && guess) { BEARER = guess; log('AUTH', 'bearer found from /api/auth/session'); }
 
   await api('/api/auth/profile');
   const farms = await api('/api/farms/my');
@@ -51,12 +51,12 @@ async function api(path, { method = 'GET', body } = {}) {
   await api('/api/rewards/farmer-pool/status');
   const snap = await api('/api/game/snapshot');
 
-  // roomId / farmSlug untuk join
+  // roomId / farmSlug for join
   const roomId = farms.json?.farms?.[0]?.roomId || farms.json?.roomId
     || snap.json?.roomId || snap.json?.farm?.roomId;
   log('DERIVED', { roomId, bearerPresent: !!BEARER });
 
-  // 2) Socket.io — rekam SEMUA event yang masuk
+  // 2) Socket.io — record ALL incoming events
   const socket = io(RT, {
     transports: ['websocket'],
     extraHeaders: { Cookie: COOKIE, ...(BEARER ? { Authorization: `Bearer ${BEARER}` } : {}) },
@@ -66,19 +66,19 @@ async function api(path, { method = 'GET', body } = {}) {
   socket.onAny((event, ...args) => log(`WS<= ${event}`, args.length === 1 ? args[0] : args));
   socket.on('connect', () => {
     log('WS', `connected sid=${socket.id}`);
-    // coba dua varian join yang ditemukan di bundle
+    // try the two known join variants
     if (roomId) {
       socket.emit('farm:join', { roomId });
       socket.emit('joinFarm', { roomId });
       socket.emit('farm:snapshot:request');
       socket.emit('farm:state/request');
     } else {
-      log('WS', 'roomId belum ketemu — cek dump REST di captures/recon.log untuk cari field-nya');
+      log('WS', 'roomId not found — check the REST dump in captures/recon.log to locate the field');
     }
   });
   socket.on('connect_error', (e) => log('WS connect_error', e.message));
   socket.on('disconnect', (r) => log('WS disconnect', r));
 
-  // tutup setelah 30 detik
-  setTimeout(() => { log('RECON', 'done — lihat captures/recon.log'); socket.close(); process.exit(0); }, 30000);
+  // close after 30 seconds
+  setTimeout(() => { log('RECON', 'done — see captures/recon.log'); socket.close(); process.exit(0); }, 30000);
 })();
