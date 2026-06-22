@@ -127,10 +127,25 @@ export async function dispatchCommand(text, ctx, send) {
         return send(`📋 <b>Starter Tasks</b>\nCurrent: ${esc(st.currentTaskId ?? 'none')}\nCompleted: ${(st.completed || []).length}`);
       }
       case '/mastery': {
-        const entries = Object.entries(s.cropMastery || {});
+        // Mastery is per-crop, harvest-count based. Live shape: { harvested, masteryLevel }.
+        // Game thresholds → masteryLevel 0-5 (max = 3000 harvests of one crop).
+        const TH = [0, 25, 100, 300, 1000, 3000];
+        const info = (v) => {
+          if (typeof v === 'number') return { lvl: v, harv: null };
+          const harv = v.harvested ?? 0;
+          const lvl = v.masteryLevel ?? TH.reduce((a, t, i) => (harv >= t ? i : a), 0);
+          const next = TH[lvl + 1];
+          const pct = next ? Math.floor(((harv - TH[lvl]) / (next - TH[lvl])) * 100) : 100;
+          return { lvl, harv, next, pct };
+        };
+        const entries = Object.entries(s.cropMastery || {}).map(([crop, v]) => [crop, info(v)]);
         if (!entries.length) return send('🏅 <b>Crop Mastery</b>\nNo mastery data yet.');
-        const lines = entries.map(([crop, v]) => typeof v === 'number' ? `  ${esc(crop)}: Lv${v}` : `  ${esc(crop)}: Lv${v.level ?? 0} (${v.progress ?? 0}%)`);
-        return send(`🏅 <b>Crop Mastery</b>\n${lines.join('\n')}`);
+        const lines = entries
+          .sort((a, b) => b[1].lvl - a[1].lvl || (b[1].harv ?? 0) - (a[1].harv ?? 0))
+          .map(([crop, m]) => m.harv == null
+            ? `  ${esc(crop)}: Lv${m.lvl}`
+            : `  ${esc(crop)}: Lv${m.lvl} ${m.next ? `(${m.harv}/${m.next}, ${m.pct}%)` : `(MAX • ${m.harv} harvested)`}`);
+        return send(`🏅 <b>Crop Mastery</b> <i>(max Lv5 = 3000 harvests; no yield bonus, rank only)</i>\n${lines.join('\n')}`);
       }
       case '/stats':
         return send(`📈 <b>Stats</b>\n${esc(ctx.stats())}\nOrders done: ${fmt(s.completedOrdersCount)}\nJobs done: ${fmt(s.completedFarmJobsCount)}\nHarvested: ${fmt(s.totalHarvestedCrops)}`);
