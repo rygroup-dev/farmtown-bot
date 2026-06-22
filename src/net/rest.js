@@ -1,7 +1,13 @@
 import { config } from '../config.js';
 import { log } from '../logger.js';
+import { Limiter } from './limiter.js';
 
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
+
+// Fleet-wide cap on concurrent in-flight HTTP requests. Shared by EVERY Rest
+// instance (all farm engines live in one process) so bursts queue instead of
+// overwhelming the server. Each retry attempt is one limiter slot.
+export const restLimiter = new Limiter(config.restMaxConcurrency);
 
 export class Rest {
   constructor({ origin = config.apiOrigin } = {}) { this.origin = origin; this.cookie = ''; this.bearer = ''; this.walletSession = ''; }
@@ -22,7 +28,10 @@ export class Rest {
       try {
         // AbortSignal.timeout prevents a hung connection (flaky server / maintenance)
         // from blocking the bot forever — the fetch rejects and we retry/back off.
-        const r = await fetch(url, { method, headers: this.headers(extra), body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(timeoutMs) });
+        // Build the AbortSignal INSIDE the limiter slot: the timeout clock must start
+        // when the fetch actually begins, not while it's queued (or queued requests
+        // would burn their budget waiting and abort spuriously).
+        const r = await restLimiter.run(() => fetch(url, { method, headers: this.headers(extra), body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(timeoutMs) }));
         const setC = r.headers.get('set-cookie'); if (setC) this.cookie = mergeCookie(this.cookie, setC);
         const text = await r.text(); let json; try { json = JSON.parse(text); } catch { json = text; }
         if (r.status >= 500 && i < retries) { await new Promise(s => setTimeout(s, 500 * (i + 1))); continue; }

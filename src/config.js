@@ -21,6 +21,11 @@ export const config = {
   solanaRpc: process.env.SOLANA_RPC || 'https://api.mainnet-beta.solana.com',
   withdrawAddress: process.env.WITHDRAW_ADDRESS || '',
   tile: { size: 32, originPx: 16 },
+  // Cap simultaneous in-flight REST requests across the WHOLE fleet (all engines
+  // share one process / one undici dispatcher). Without this, 49 farms re-binding
+  // wallets at once flood the slow /api/auth/wallet/verify and every request times
+  // out together. Keep low — REST is for auth/pool polls, not gameplay (socket.io).
+  restMaxConcurrency: Number(process.env.REST_MAX_CONCURRENCY || 6),
   limits: { maxPendingActions: 1, minActionGapMs: 900, maxActionGapMs: 2600 },
   pool: {
     enabled: process.env.FARMER_POOL !== 'off',
