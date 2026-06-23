@@ -216,9 +216,18 @@ export async function runAccount(account = {}) {
       if (!pending.length) return [];
       const results = [];
       for (const entry of pending) {
-        const engine = [...reg.values()].find(e => e.addr === entry.wallet);
-        const r = engine ? await retryPendingStar(engine.rest, entry) : await retryPendingStar(rest, entry);
-        results.push({ ...entry, ...r });
+        try {
+          const engine = [...reg.values()].find(e => e.addr === entry.wallet);
+          if (engine) {
+            await bindWallet(engine.rest, engine.keypair);
+            const r = await retryPendingStar(engine.rest, entry);
+            results.push({ ...entry, ...r });
+          } else {
+            await bindWallet(rest, keypair);
+            const r = await retryPendingStar(rest, entry);
+            results.push({ ...entry, ...r });
+          }
+        } catch (e) { results.push({ ...entry, ok: false, reason: e.message }); }
       }
       return results;
     },
