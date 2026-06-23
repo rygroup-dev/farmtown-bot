@@ -233,14 +233,27 @@ export async function dispatchCommand(text, ctx, send) {
         if (!ctx.registry) return send('👥 Multi-account not available.');
         const subs = [...ctx.registry.values()].filter(e => !e.isMain);
         if (!subs.length) return send('👥 No sub accounts running.');
-        const lines = subs.map(e => {
+        await send('👥 Fetching sub account details…');
+        const lines = [];
+        let totOwned = 0, totStars = 0, totFarm = 0, totGold = 0;
+        for (const e of subs) {
           const s = e.state;
           const owned = s?.ownedTiles?.()?.length ?? 0;
-          return `• <b>${esc(e.label)}</b> ${e.flags?.connected ? '🟢' : '🔴'}\n  L${fmt(s?.level)} • 💰${fmt(s?.gold)}g • ⭐${fmt(s?.stars)} stars\n  🏡 Plots: ${owned} • 🌾 Ready: ${s?.readyToHarvest?.()?.length ?? 0}`;
-        });
-        const totOwned = subs.reduce((s, e) => s + (e.state?.ownedTiles?.()?.length ?? 0), 0);
-        const totStars = subs.reduce((s, e) => s + (e.state?.stars ?? 0), 0);
-        return send(`👥 <b>Sub Accounts (${subs.length})</b>\n${lines.join('\n')}\n\n📊 Total: ${totOwned} plots • ${totStars}⭐ stars`);
+          const ready = s?.readyToHarvest?.()?.length ?? 0;
+          const fStars = s?.claimableFallingStars?.()?.length ?? 0;
+          let farmBal = 0;
+          try { const info = await (await import('../game/wallet_info.js')).getWalletInfo(e.keypair); farmBal = info.farm || 0; } catch {}
+          totOwned += owned; totStars += (s?.stars ?? 0); totFarm += farmBal; totGold += (s?.gold ?? 0);
+          lines.push(
+            `• <b>${esc(e.label)}</b> ${e.flags?.connected ? '🟢' : '🔴'} <code>${esc(e.addr?.slice(0, 4) + '…' + e.addr?.slice(-4))}</code>\n` +
+            `  L${fmt(s?.level)} • 💰${fmt(s?.gold)}g • ⭐${fmt(s?.stars)} stars • 🌾${fmt(Math.floor(farmBal))} $FARM\n` +
+            `  🏡 Plots: ${owned} • ✅ Ready: ${ready}${fStars ? ` • 🌟 Stars: ${fStars}` : ''}`
+          );
+        }
+        return send(
+          `👥 <b>Sub Accounts (${subs.length})</b>\n${lines.join('\n')}\n\n` +
+          `📊 Total: ${totOwned} plots • ${totStars}⭐ stars • 💰${fmt(totGold)}g • 🌾${fmt(Math.floor(totFarm))} $FARM`
+        );
       }
       case '/mintsession': {
         if (!ctx.testMint) return send('🧩 Not available in this build.');
