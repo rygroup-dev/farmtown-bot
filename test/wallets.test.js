@@ -8,7 +8,7 @@ import { generateSubWallets, loadSubWallets, buildRoster, parseSecret, MAX_SUB_W
 
 const tmp = () => path.join(os.tmpdir(), `ftw-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
 
-test('generates sub wallets, persists, and caps at 49', () => {
+test(`generates sub wallets, persists, and caps at ${MAX_SUB_WALLETS}`, () => {
   const f = tmp();
   let r = generateSubWallets(3, f);
   assert.equal(r.added, 3); assert.equal(r.total, 3);
@@ -16,8 +16,8 @@ test('generates sub wallets, persists, and caps at 49', () => {
   // append more
   r = generateSubWallets(2, f);
   assert.equal(r.total, 5);
-  // cap at 49 — asking for 100 only adds the remaining 44
-  r = generateSubWallets(100, f);
+  // cap at MAX_SUB_WALLETS — asking for more only adds the remaining
+  r = generateSubWallets(MAX_SUB_WALLETS + 100, f);
   assert.equal(r.total, MAX_SUB_WALLETS);
   assert.equal(r.added, MAX_SUB_WALLETS - 5);
   // file is chmod 600
