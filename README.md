@@ -4,9 +4,9 @@
 > **[play.farmtown.online](https://play.farmtown.online)**.
 
 Farms gold/XP, completes orders/jobs/quests, auto-expands land, earns withdrawable
-**$FARM** from the Farmer's Pool, and runs **up to 50 accounts at once** — all from one
-**Telegram** bot. Built for resilience: anti-ban timing, anti-cheat-safe serial actions,
-auto-reconnect, self-refreshing sessions, and a degraded-server/maintenance detector.
+**$FARM** (Token-2022) from the Farmer's Pool, and runs **up to 1000+ accounts at once** —
+all from one **Telegram** bot. Built for resilience: anti-ban timing, anti-cheat-safe serial
+actions, auto-reconnect, self-refreshing sessions, and a degraded-server/maintenance detector.
 
 ### ✨ Highlights
 - 🧠 **Smart farming brain** — order-demand-aware planting, **50 / 30 / 20** sacrifice/variety/profit
@@ -16,9 +16,9 @@ auto-reconnect, self-refreshing sessions, and a degraded-server/maintenance dete
 - 💎 **Farmer's Pool ($FARM)** — pool-timing-aware (countdown, early bird +10% bonus),
   auto-contributes free farm-points repeatedly; optional surplus-gold and **level-sacrifice**
   strategies (with hard guardrails). Crop sacrifice tracking ready for when the server enables it.
-- 👥 **Multi-account** — 1 main + up to 49 auto-generated sub-wallets, each its own
+- 👥 **Multi-account** — 1 main + up to 1000 auto-generated sub-wallets, each its own
   farm/session, with **captcha auto-login** (no per-account browser paste) and
-  auto-sweep of all $FARM to your main wallet.
+  auto-sweep of all $FARM to your main wallet. Controlled via `MULTI_ACCOUNT_LIMIT` in `.env`.
 - 📱 **Telegram control** — 40+ commands: status, balances, manual actions, multi-account
   monitoring, star purchases, live re-login, and proactive alerts.
 - 🛡️ **Resilient & quiet** — gaussian human timing, active-hours sleep, zombie-connection
@@ -147,6 +147,31 @@ one-liner), ⭐ **falling star collected**, 🏊 **pool countdown/open/early bir
 
 ---
 
+## 💎 Farmer's Pool & Stars
+
+The bot auto-earns **$FARM tokens** from the Farmer's Pool. Requirements to enter:
+- Level 30+ ✅
+- Hold 2,500+ $FARM in wallet ✅
+- Buy or collect 3+ Stars this event (star gate)
+
+**Stars** can be earned two ways:
+- 🌟 **Falling stars** — spawned randomly on your farm, auto-collected by the bot (free!)
+- 💰 **Purchase** — buy with $FARM via `/starmain starter` (3⭐ for ~$5 in $FARM)
+
+**Pool contribution** runs every ~10 min (5 min during early bird +10% bonus window):
+- Always burns free **farm points** (zero cost)
+- Optionally burns surplus **gold** (`/poolburn on`)
+- Optionally **sacrifices levels** for 3× power each (advanced, opt-in via `.env`)
+
+The bot tracks pool timing (`opensAt`, `closesAt`, early bird window) and auto-contributes
+the moment the pool opens. `/pool` shows full status including countdown, gates, and
+estimated payout.
+
+**$FARM uses Token-2022** (`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`), not the legacy
+SPL Token program — all on-chain operations handle this automatically.
+
+---
+
 ## 🛡️ Anti-ban / anti-cheat design
 
 - **Serial action queue** — ≤1 pending action, waits for each `game:actionResult`,
@@ -185,10 +210,11 @@ Deep dives: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) (wire-protocol reference),
 
 ---
 
-## 👥 Multi-account (experimental, opt-in)
+## 👥 Multi-account (opt-in)
 
-Run up to **50 farms at once** (main + 49 generated sub-wallets), all from one Telegram
-bot, with every sub's earned `$FARM` auto-swept to your main wallet.
+Run **1 main + up to 1000 sub-wallets** at once, all from one Telegram bot, with every
+sub's earned `$FARM` auto-swept to your main wallet. Control how many actually run with
+`MULTI_ACCOUNT_LIMIT` in `.env`.
 
 A server constraint shapes the design: **one Supabase session authorizes only one wallet
 at a time**, and anonymous sign-up is captcha-gated — so *each account needs its own
@@ -232,7 +258,7 @@ tail -f data/service.log
 ## 🧪 Tests
 
 ```bash
-npm test     # node --test — pure-logic units (planner, economy, auth parsing, …)
+npm test     # node --test — 107 tests (planner, economy, pool, stars, auth, telegram, …)
 ```
 
 ---
