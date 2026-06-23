@@ -34,6 +34,7 @@ export const COMMAND_MENU = [
   ['starsub', '<bundle> buy stars all subs'],
   ['sendfarm', '<amount> send FARM to all subs'],
   ['sendfee', '<SOL> send SOL gas to all subs'],
+  ['retrystar', 'Retry pending star purchases'],
   ['start', 'Start the bot'],
   ['stop', 'Stop the bot'],
   ['pause', 'Pause autopilot'],
@@ -286,6 +287,18 @@ export async function dispatchCommand(text, ctx, send) {
         let msg = `◎ <b>SOL gas distribution</b>\n✅ ${ok.length} sent • ❌ ${fail.length} failed • Total: ${total.toFixed(4)} SOL\n`;
         if (fail.length && fail.length <= 10) msg += '\nFailed:\n' + fail.map(r => `• ${esc(r.label)}: ${esc(r.reason)}`).join('\n');
         else if (fail.length > 10) msg += `\n${fail.length} failed (check /log)`;
+        return send(msg);
+      }
+
+      case '/retrystar': {
+        if (!ctx.retryStars) return send('⭐ Not available.');
+        await send('⭐ Retrying pending star confirmations…');
+        const results = await ctx.retryStars();
+        if (!results.length) return send('⭐ No pending star purchases to retry.');
+        const ok = results.filter(r => r.ok);
+        const fail = results.filter(r => !r.ok);
+        let msg = `⭐ <b>Retry results</b>\n✅ ${ok.length} confirmed • ❌ ${fail.length} still pending\n`;
+        for (const r of results) msg += `\n${r.ok ? '✅' : '❌'} ${esc(r.wallet?.slice(0,8))}… ${r.ok ? r.stars + '⭐ credited' : esc(r.reason || 'failed')}`;
         return send(msg);
       }
 

@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { Connection, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction } from '@solana/web3.js';
 import {
   getAssociatedTokenAddress, getAccount, getOrCreateAssociatedTokenAccount,
@@ -5,6 +6,13 @@ import {
 } from '@solana/spl-token';
 import { config } from '../config.js';
 import { log } from '../logger.js';
+
+const PENDING_FILE = 'data/pending_stars.json';
+function loadPending() { try { return JSON.parse(fs.readFileSync(PENDING_FILE, 'utf8')); } catch { return []; } }
+function savePending(list) { fs.writeFileSync(PENDING_FILE, JSON.stringify(list, null, 2)); }
+export function addPendingStar(entry) { const p = loadPending(); p.push({ ...entry, ts: Date.now() }); savePending(p); }
+export function removePendingStar(quoteId) { savePending(loadPending().filter(e => e.quoteId !== quoteId)); }
+export function getPendingStars() { return loadPending(); }
 
 const FARM_MINT = new PublicKey('yMJPZbnhoHib3ib8n8PfiVcp9yauk1vnaGKLx7epump');
 const FARM_PROGRAM = TOKEN_2022_PROGRAM_ID;
@@ -63,11 +71,24 @@ export async function buyStars(rest, bundleId, fromKeypair = config.keypair) {
     if (bal < amount) return { ok: false, reason: `not enough FARM: need ${Number(amount) / DECIMALS}, have ${Number(bal) / DECIMALS}` };
     const tx = new Transaction().add(createTransferInstruction(fromAta, treasuryAta, fromKeypair.publicKey, amount, [], FARM_PROGRAM));
     const sig = await sendAndConfirmTransaction(c, tx, [fromKeypair]);
-    const cr = await rest.req('/api/token/stars/confirm', {
-      method: 'POST', body: { quoteId: quote.quoteId, txSignature: sig }, timeoutMs: 30000,
-    });
-    const ok = cr.status === 200 && cr.json?.ok !== false;
+    log.info('STARS', `tx sent sig=${sig} quoteId=${quote.quoteId} — confirming…`);
+    let cr;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      cr = await rest.req('/api/token/stars/confirm', {
+        method: 'POST', body: { quoteId: quote.quoteId, txSignature: sig }, timeoutMs: 45000,
+      });
+      if (cr.status === 200 && cr.json?.ok) break;
+      log.warn('STARS', `confirm attempt ${attempt}: ${cr.status} ${JSON.stringify(cr.json)}`);
+      if (attempt < 2) await new Promise(r => setTimeout(r, 3000));
+    }
+    const ok = cr.status === 200 && cr.json?.ok === true;
     const stars = quote.totalStars;
+    if (!ok) {
+      addPendingStar({ quoteId: quote.quoteId, sig, bundleId, stars, wallet: fromKeypair.publicKey.toBase58() });
+      log.warn('STARS', `confirm failed — saved to pending. quoteId=${quote.quoteId} sig=${sig} reason=${JSON.stringify(cr.json)}`);
+    } else {
+      removePendingStar(quote.quoteId);
+    }
     log.info('STARS', `buy ${bundleId} ${stars}⭐ amount=${Number(amount) / DECIMALS} FARM sig=${sig} confirm=${ok}`);
     return { ok, stars, farmSpent: Number(amount) / DECIMALS, sig, confirm: cr.json };
   } catch (e) {
@@ -91,9 +112,24 @@ export async function sendFarmTo(toAddress, amount, fromKeypair = config.keypair
     log.info('WALLET', `sent ${amount} FARM to ${toAddress} sig=${sig}`);
     return { ok: true, amount, sig };
   } catch (e) {
-    log.warn('WALLET', 'sendFarm failed: ' + e.message);
-    return { ok: false, reason: e.message };
+    log.warn('WALLET', `sendFarm to ${toAddress} failed: ${e.message || e}`);
+    return { ok: false, reason: e.message || String(e) || 'unknown error' };
   }
+}
+
+export async function retryPendingStar(rest, entry) {
+  try {
+    const cr = await rest.req('/api/token/stars/confirm', {
+      method: 'POST', body: { quoteId: entry.quoteId, txSignature: entry.sig }, timeoutMs: 45000,
+    });
+    if (cr.status === 200 && cr.json?.ok) {
+      removePendingStar(entry.quoteId);
+      log.info('STARS', `retry confirm OK quoteId=${entry.quoteId}`);
+      return { ok: true, stars: entry.stars, confirm: cr.json };
+    }
+    log.warn('STARS', `retry confirm failed: ${JSON.stringify(cr.json)}`);
+    return { ok: false, reason: cr.json?.message || cr.status };
+  } catch (e) { return { ok: false, reason: e.message }; }
 }
 
 export async function sendSolTo(toAddress, lamports, fromKeypair = config.keypair) {

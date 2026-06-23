@@ -13,7 +13,7 @@ import { ActionRunner } from '../game/actions.js';
 import { planActions, planClaims, planStorage } from '../game/brain.js';
 import { loadEconomy } from '../game/economy.js';
 import { maybeContribute, pollFarmerPool } from '../game/farmerpool.js';
-import { getWalletInfo, withdrawFarm, buyStars, sendFarmTo, sendSolTo } from '../game/wallet_info.js';
+import { getWalletInfo, withdrawFarm, buyStars, sendFarmTo, sendSolTo, getPendingStars, retryPendingStar } from '../game/wallet_info.js';
 import { buildRoster, generateSubWallets, parseSecret, loadSubWallets, MAX_SUB_WALLETS } from '../wallets.js';
 import { withinActiveHours, secondsUntilInactive, sleep, gaussianDelay, maybeBreak } from '../safety/humanizer.js';
 import { startTelegram } from '../telegram/bot.js';
@@ -208,6 +208,17 @@ export async function runAccount(account = {}) {
         if (a.isMain) continue;
         const r = await sendSolTo(a.address, lamportsPerSub, keypair);
         results.push({ label: a.label, address: a.address, ...r });
+      }
+      return results;
+    },
+    retryStars: async () => {
+      const pending = getPendingStars();
+      if (!pending.length) return [];
+      const results = [];
+      for (const entry of pending) {
+        const engine = [...reg.values()].find(e => e.addr === entry.wallet);
+        const r = engine ? await retryPendingStar(engine.rest, entry) : await retryPendingStar(rest, entry);
+        results.push({ ...entry, ...r });
       }
       return results;
     },
