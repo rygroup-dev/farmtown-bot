@@ -1,9 +1,10 @@
 import { rankCrops } from './economy.js';
+import { SACRIFICE_CROPS } from './farmerpool.js';
 
 // Normalize any crop/seed key to a bare lowercase crop id ("Carrot"/"carrot_seed" → "carrot").
 const cropKey = (s) => String(s).toLowerCase().replace(/_seed$/, '');
 
-export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick = 12, goldReserve = 150, timeBudgetSeconds = Infinity, varietyRatio = 0.3 } = {}) {
+export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick = 12, goldReserve = 150, timeBudgetSeconds = Infinity, varietyRatio = 0.3, sacrificeRatio = 0 } = {}) {
   const plan = [];
   for (const t of state.readyToHarvest())
     plan.push({ kind:'harvest', event:'crop:harvest/request', payload:{ tileX:t.x, tileY:t.y }, meta:{ action:'harvest', tool:'hoe' } });
@@ -37,18 +38,22 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
     }
     // Build a tile→crop queue: sow demanded crops first (most valuable demanded crop
     // first, since `candidates` is rank-sorted). Remaining tiles are then filled by a
-    // 70/30 split — ~70% the single best profit/xp crop (steady income), ~30% "variety"
-    // rotated across the other unlocked+affordable crops (seeds future orders, crop
-    // mastery, and quest chapters; avoids brittle monoculture). Tunable via varietyRatio.
+    // split: sacrificeRatio% sacrifice crops (starfruit/crystal_berry for pool power),
+    // then varietyRatio% variety, rest = top profit crop.
     const queue = [];
     for (const c of candidates) { let r = remainById[cropKey(c.id)] || 0; while (r-- > 0) queue.push(c); }
     const top = candidates[0];
-    const varietyPool = candidates.slice(1); // other growable crops, rank-sorted
-    // Deterministic 70/30 over a window of 10: the last `round(varietyRatio*10)` go to variety.
-    const varietyPerWindow = Math.max(0, Math.min(10, Math.round(varietyRatio * 10)));
-    const isVarietySlot = (i) => varietyPool.length > 0 && (i % 10) >= (10 - varietyPerWindow);
-    let varietyTurn = 0;
-    const fillerFor = (i) => isVarietySlot(i) ? varietyPool[varietyTurn++ % varietyPool.length] : top;
+    const varietyPool = candidates.slice(1);
+    const sacCrops = candidates.filter(c => c.id in SACRIFICE_CROPS);
+    const sacPerWindow = Math.max(0, Math.min(10, Math.round(sacrificeRatio * 10)));
+    const varietyPerWindow = Math.max(0, Math.min(10 - sacPerWindow, Math.round(varietyRatio * 10)));
+    let sacTurn = 0, varietyTurn = 0;
+    const fillerFor = (i) => {
+      const slot = i % 10;
+      if (sacCrops.length > 0 && slot < sacPerWindow) return sacCrops[sacTurn++ % sacCrops.length];
+      if (varietyPool.length > 0 && slot >= (10 - varietyPerWindow)) return varietyPool[varietyTurn++ % varietyPool.length];
+      return top;
+    };
 
     const plantedSeed = {}; // per-seed count queued THIS tick, for buy decisions
     let planted = 0;

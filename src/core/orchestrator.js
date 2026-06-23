@@ -567,7 +567,7 @@ export async function runAccount(account = {}) {
         const ecoForPlant = flags.forceCrop && eco[flags.forceCrop] ? { [flags.forceCrop]: eco[flags.forceCrop] } : eco;
         const plan = [
           ...planClaims(state),
-          ...planActions(state, ecoForPlant, { objective: flags.objective, timeBudgetSeconds, goldReserve: settings.goldReserve }),
+          ...planActions(state, ecoForPlant, { objective: flags.objective, timeBudgetSeconds, goldReserve: settings.goldReserve, sacrificeRatio: config.pool.enabled ? 0.5 : 0 }),
           ...planStorage(state),
         ];
         if (plan.length) {
