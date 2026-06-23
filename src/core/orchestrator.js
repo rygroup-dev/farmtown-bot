@@ -401,7 +401,17 @@ export async function runAccount(account = {}) {
   (async function keepalive() {
     while (flags.running) {
       try {
-        if (supabaseExpiringSoon(session)) { const okR = await refreshSupabase(session, rest); if (!okR) tg.notify('⚠️ Supabase refresh failed'); }
+        if (supabaseExpiringSoon(session)) {
+          const okR = await refreshSupabase(session, rest);
+          // refresh_token is dead (rotated/expired — the post-restart failure mode). Don't
+          // just warn every 60s and rely on the action-path rescue: drive the real recovery
+          // here. A reconnect whose reason matches supabaseRemintRequired() forces the next
+          // reauth() to ensureSupabaseFresh(true) → re-mint via captcha + re-bind the wallet
+          // (same path as a server-rejected token). Self-heals MAIN and stops the once-a-minute
+          // "⚠️ Supabase refresh failed" spam (scheduleReconnect notifies once, then the fresh
+          // token makes supabaseExpiringSoon() false so this branch goes quiet).
+          if (!okR && !reconnecting) scheduleReconnect('invalid_grant: supabase refresh failed');
+        }
         await keepWalletSessionAlive(rest);
       } catch (e) { log.warn('KEEPALIVE', e.message); }
       await sleep(60000);
