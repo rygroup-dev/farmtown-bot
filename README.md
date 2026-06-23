@@ -9,15 +9,18 @@ Farms gold/XP, completes orders/jobs/quests, auto-expands land, earns withdrawab
 auto-reconnect, self-refreshing sessions, and a degraded-server/maintenance detector.
 
 ### ✨ Highlights
-- 🧠 **Smart farming brain** — order-demand-aware planting, 70/30 profit/variety crop mix,
-  dead-crop recovery, aggressive-but-safe land expansion, storage upgrades.
-- 💎 **Farmer's Pool ($FARM)** — auto-contributes free farm-points repeatedly; optional
-  surplus-gold and **level-sacrifice** strategies (with hard guardrails).
+- 🧠 **Smart farming brain** — order-demand-aware planting, **50 / 30 / 20** sacrifice/variety/profit
+  crop mix (starfruit + crystal berry for pool power), dead-crop recovery, land expansion, storage upgrades.
+- 🌟 **Falling star auto-collector** — detects server-spawned stars on your farm and
+  auto-claims them before they expire. **Free stars from gameplay** — no purchase needed.
+- 💎 **Farmer's Pool ($FARM)** — pool-timing-aware (countdown, early bird +10% bonus),
+  auto-contributes free farm-points repeatedly; optional surplus-gold and **level-sacrifice**
+  strategies (with hard guardrails). Crop sacrifice tracking ready for when the server enables it.
 - 👥 **Multi-account** — 1 main + up to 49 auto-generated sub-wallets, each its own
   farm/session, with **captcha auto-login** (no per-account browser paste) and
   auto-sweep of all $FARM to your main wallet.
 - 📱 **Telegram control** — 40+ commands: status, balances, manual actions, multi-account
-  monitoring, live re-login, and proactive alerts.
+  monitoring, star purchases, live re-login, and proactive alerts.
 - 🛡️ **Resilient & quiet** — gaussian human timing, active-hours sleep, zombie-connection
   watchdog, low auth churn, and clear server-degraded/recovered notifications.
 
@@ -98,17 +101,24 @@ truly dies it will message you on Telegram with the same one-liner to re-paste.
 
 ## 🧠 The farming brain
 
-Each tick the planner runs, in order: **harvest** ripe crops (on the server's authoritative
-`ready` state, even slightly overdue) → **clear dead crops** (unsticks tiles after long
-downtime) → **clear blockers** (pickaxe for rock/stone, axe for trees/weeds) → **hoe** →
-**plant** → **buy seeds** → **claim** starter tasks, orders & farm jobs → **auto-expand**
-adjacent plots → **upgrade storage**.
+Each tick the planner runs, in order: **collect falling stars** → **harvest** ripe crops →
+**clear dead crops** → **clear blockers** (pickaxe for rock/stone, axe for trees/weeds) →
+**hoe** → **plant** → **buy seeds** → **claim** starter tasks, orders & farm jobs →
+**auto-expand** adjacent plots → **upgrade storage**.
 
 Crop choice is **order-demand-aware**: it sows exactly what your open orders need first
-(case-insensitive, netted against your basket and what's already growing — orders are the
-main gold source), then fills the rest with a **70 / 30 split** — ~70 % your best profit/hr
-crop, ~30 % rotated variety (seeds future orders, crop mastery and quests). Expansion uses
-a **farm-size-scaled gold reserve** so a big farm never starves its own re-planting.
+(case-insensitive, netted against your basket and what's already growing), then fills the
+rest with a **50 / 30 / 20 split**:
+
+| Slot | % | What gets planted |
+|------|---|-------------------|
+| **Sacrifice** | 50% | Starfruit (2 pool power) + Crystal Berry (1 pool power) — rotated |
+| **Variety** | 30% | All other unlocked crops — seeds future orders, mastery, quests |
+| **Top profit** | 20% | Best profit/hr crop (usually Crystal Berry at L25+) |
+
+When pool earning is disabled (`FARMER_POOL=off`), the sacrifice slots fold back into the
+classic 70/30 profit/variety split. Expansion uses a **farm-size-scaled gold reserve**
+(250 gold × owned plots) so a big farm never starves its own re-planting.
 
 ---
 
@@ -123,14 +133,17 @@ a **farm-size-scaled gold reserve** so a big farm never starves its own re-plant
 **Actions** — `/harvest` `/plant <crop>` `/plantall <crop>` `/buyplot` `/buyseed <crop> [qty]`
 `/upgradestorage` `/claimpool` `/auth <paste>` `/reconnect` `/restart`
 
-**Multi-account** — `/accounts` `/genwallets <n>` `/mintsession` `/sweep`
+**Stars & fund** — `/starmain <bundle>` `/starsub <bundle>` `/sendfarm <amount>` `/sendfee <SOL>` `/retrystar`
+
+**Multi-account** — `/accounts` `/subacc` `/genwallets <n>` `/mintsession` `/sweep`
 
 **Diagnostics** — `/log [n]` `/ping` `/help`
 
 The bot also **pushes alerts**: 🟢 joined (labelled per account, with real level/gold),
 🔴 disconnected, 🟠 **server degraded / maintenance** (with "safe to /stop now, /start
-later" guidance), ✅ **server recovered**, and ⚠️ **session expired** (with the re-paste
-one-liner).
+later" guidance), ✅ **server recovered**, ⚠️ **session expired** (with the re-paste
+one-liner), ⭐ **falling star collected**, 🏊 **pool countdown/open/early bird**, and
+⚠️ **star gate not met**.
 
 ---
 
@@ -158,10 +171,11 @@ one-liner).
 | Net | `src/net/rest.js` | `/api/*` + Supabase HTTP, retry/backoff/timeout, cookie jar |
 | | `src/net/socket.js` | socket.io: queue gate, ping, reconnect, event bus |
 | Game | `src/game/economy.js` | per-crop economics + profit/xp ranking |
-| | `src/game/state.js` | in-memory mirror of farm state (server = truth) |
+| | `src/game/state.js` | in-memory mirror of farm state + falling stars (server = truth) |
 | | `src/game/actions.js` | serial executor: backpressure-safe, walk-then-act |
-| | `src/game/brain.js` | planner: harvest→clear→hoe→plant→buy→claim→expand |
-| | `src/game/farmerpool.js` | $FARM earning (poll → decide → claim) |
+| | `src/game/brain.js` | planner: stars→harvest→clear→hoe→plant→buy→claim→expand |
+| | `src/game/farmerpool.js` | $FARM earning (pool timing, sacrifice, early bird) |
+| | `src/game/wallet_info.js` | on-chain balance, withdraw, star purchase, Token-2022 |
 | Safety | `src/safety/humanizer.js` | gaussian delays, walk realism, active-hours |
 | Control | `src/telegram/bot.js` | command router + push notifications |
 | Core | `src/core/orchestrator.js`, `src/index.js` | lifecycle, reconnect, tick loop |
