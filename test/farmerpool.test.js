@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { decideContribution } from '../src/game/farmerpool.js';
+import { decideContribution, poolTiming, decideCropSacrifice, SACRIFICE_CROPS } from '../src/game/farmerpool.js';
 
 const base = {
   config: { enabled: true, minLevel: 10, goldPerPower: 250000, farmPointsPerPower: 100, claimPowerPerBurnedLevel: 3 },
@@ -88,4 +88,66 @@ test('level-sacrifice uses live currentLevel over stale pool cache, never below 
 test('level-sacrifice off by default (no accidental burns)', () => {
   const c = decideContribution({ ...base, player: { ...base.player, level: 30, burnableLevels: 20 } }, { currentLevel: 30 });
   assert.strictEqual(c.levelsToBurn, 0);
+});
+
+// --- Pool Timing ---
+
+test('poolTiming reports isOpen when now is between opensAt and closesAt', () => {
+  const now = Date.now();
+  const t = poolTiming({ pool: { opensAt: new Date(now - 3600000).toISOString(), closesAt: new Date(now + 3600000).toISOString() }, earlyBird: {} });
+  assert.strictEqual(t.isOpen, true);
+});
+
+test('poolTiming reports not open when before opensAt', () => {
+  const now = Date.now();
+  const t = poolTiming({ pool: { opensAt: new Date(now + 3600000).toISOString(), closesAt: new Date(now + 7200000).toISOString() }, earlyBird: {} });
+  assert.strictEqual(t.isOpen, false);
+  assert.ok(t.msUntilOpen > 0);
+});
+
+test('poolTiming early bird detection', () => {
+  const now = Date.now();
+  const t = poolTiming({
+    pool: { opensAt: new Date(now - 1000).toISOString(), closesAt: new Date(now + 172800000).toISOString() },
+    earlyBird: { active: true, bonus: 0.1, endsAt: new Date(now + 21600000).toISOString() },
+  });
+  assert.strictEqual(t.isOpen, true);
+  assert.strictEqual(t.isEarlyBird, true);
+});
+
+test('decideContribution skips when pool has opensAt in the future', () => {
+  const now = Date.now();
+  const status = {
+    ...base,
+    pool: { ...base.pool, opensAt: new Date(now + 3600000).toISOString(), closesAt: new Date(now + 172800000).toISOString() },
+  };
+  assert.strictEqual(decideContribution(status), null);
+});
+
+test('decideContribution contributes when pool opensAt is in the past', () => {
+  const now = Date.now();
+  const status = {
+    ...base,
+    pool: { ...base.pool, opensAt: new Date(now - 3600000).toISOString(), closesAt: new Date(now + 3600000).toISOString() },
+  };
+  const c = decideContribution(status);
+  assert.strictEqual(c.farmPointsToBurn, 200);
+});
+
+// --- Crop Sacrifice ---
+
+test('SACRIFICE_CROPS has starfruit=2 and crystal_berry=1 power', () => {
+  assert.strictEqual(SACRIFICE_CROPS.starfruit, 2);
+  assert.strictEqual(SACRIFICE_CROPS.crystal_berry, 1);
+});
+
+test('decideCropSacrifice burns surplus above reserve', () => {
+  const r = decideCropSacrifice({ starfruit: 20, crystal_berry: 15 }, { reservePerCrop: 5 });
+  assert.deepStrictEqual(r.crops, { starfruit: 15, crystal_berry: 10 });
+  assert.strictEqual(r.totalPower, 15 * 2 + 10 * 1);
+});
+
+test('decideCropSacrifice returns null when nothing to burn', () => {
+  assert.strictEqual(decideCropSacrifice({ starfruit: 3, crystal_berry: 2 }, { reservePerCrop: 5 }), null);
+  assert.strictEqual(decideCropSacrifice({}), null);
 });

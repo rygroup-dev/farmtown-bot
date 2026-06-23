@@ -98,6 +98,8 @@ export function planStorage(state, { goldReserve = 5000 } = {}) {
 
 export function planClaims(state) {
   const plan = [];
+  for (const star of state.claimableFallingStars())
+    plan.push({ kind:'fallingStar', event:'game:action', payload:{ action: 'claimFallingStar', fallingStarId: star.id, clientDebug: { interactionMode: 'farm', networkMode: 'socket' } }, meta:null });
   if (state.starterTasks?.currentTaskId)
     plan.push({ kind:'starter', event:'starter:complete/request', payload:{ taskId: state.starterTasks.currentTaskId }, meta:null });
   for (const o of state.completableOrders())

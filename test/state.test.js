@@ -84,6 +84,43 @@ test('expandableTiles returns only locked tiles adjacent to owned', () => {
   assert.deepStrictEqual(e, ['5,6', '6,5']);
 });
 
+test('fallingStars tracked from snapshot and claimed/expired removed', () => {
+  const s = new GameState();
+  const now = Date.now();
+  s.apply('farm:snapshot', { tiles: [], fallingStars: [
+    { id: 'fs1', tileX: 3, tileY: 4, rewardStars: 1, status: 'spawned', spawnedAt: now, expiresAt: now + 60000 },
+    { id: 'fs2', tileX: 5, tileY: 6, rewardStars: 2, status: 'spawned', spawnedAt: now, expiresAt: now + 60000 },
+  ]});
+  assert.strictEqual(s.claimableFallingStars().length, 2);
+
+  s.apply('game:actionResult', { ok: true, fallingStar: { id: 'fs1', status: 'claimed', rewardStars: 1 }, premiumBalance: { stars: 1 } });
+  assert.strictEqual(s.fallingStars.length, 1);
+  assert.strictEqual(s.stars, 1);
+
+  s.apply('game:actionResult', { ok: true, fallingStar: { id: 'fs2', status: 'expired' } });
+  assert.strictEqual(s.fallingStars.length, 0);
+});
+
+test('fallingStars updated from actionResult with full array', () => {
+  const s = new GameState();
+  const now = Date.now();
+  s.apply('game:actionResult', { ok: true, fallingStars: [
+    { id: 'fs3', tileX: 1, tileY: 1, rewardStars: 1, status: 'spawned', expiresAt: now + 60000 },
+  ]});
+  assert.strictEqual(s.claimableFallingStars().length, 1);
+});
+
+test('expired fallingStars not returned by claimableFallingStars', () => {
+  const s = new GameState();
+  const now = Date.now();
+  s.fallingStars = [
+    { id: 'fs4', status: 'spawned', expiresAt: now - 1000 },
+    { id: 'fs5', status: 'spawned', expiresAt: now + 60000 },
+  ];
+  assert.strictEqual(s.claimableFallingStars().length, 1);
+  assert.strictEqual(s.claimableFallingStars()[0].id, 'fs5');
+});
+
 test('readyToHarvest harvests overdue-but-ready crops (server groundState=ready, diesAt passed)', () => {
   const s = new GameState();
   const now = Date.now();

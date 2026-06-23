@@ -9,6 +9,7 @@ export class GameState {
     this.cropMastery = {}; this.questChapters = null;
     this.farmValue = 0; this.farmRank = 0; this.farmPoints = 0;
     this.completedOrdersCount = 0; this.completedFarmJobsCount = 0; this.totalHarvestedCrops = 0;
+    this.fallingStars = [];
   }
   key(x, y) { return `${x},${y}`; }
   apply(event, data) {
@@ -16,6 +17,7 @@ export class GameState {
       case 'farm:snapshot':
       case 'farm:state/sync': {
         for (const t of (data.tiles || [])) this.tiles.set(this.key(t.x, t.y), t);
+        if (data.fallingStars) this.fallingStars = data.fallingStars;
         break;
       }
       case 'player:farmState/sync': {
@@ -49,10 +51,13 @@ export class GameState {
       }
       case 'game:actionResult': {
         if (data.ok && data.inventoryDelta?.seeds) for (const [k, v] of Object.entries(data.inventoryDelta.seeds)) this.inventory[k] = (this.inventory[k] || 0) + v;
-        // The action result carries the updated tile(s) — apply immediately so the next
-        // tick doesn't re-target an already-harvested/changed tile ("Nothing ready" race).
         if (data.ok && data.tile) this.tiles.set(this.key(data.tile.x, data.tile.y), data.tile);
         if (data.ok) for (const t of (data.changedTiles || [])) this.tiles.set(this.key(t.x, t.y), t);
+        if (data.fallingStars) this.fallingStars = data.fallingStars;
+        if (data.snapshot?.fallingStars) this.fallingStars = data.snapshot.fallingStars;
+        if (data.fallingStar?.status === 'claimed' || data.fallingStar?.status === 'expired')
+          this.fallingStars = this.fallingStars.filter(s => s.id !== data.fallingStar.id);
+        if (data.premiumBalance?.stars != null) this.stars = data.premiumBalance.stars;
         break;
       }
     }
@@ -99,6 +104,10 @@ export class GameState {
   }
   claimableJobs() {
     return this.farmJobs.filter(j => (j.current || 0) >= (j.target || Infinity));
+  }
+  claimableFallingStars() {
+    const now = Date.now();
+    return this.fallingStars.filter(s => s.status === 'spawned' && (!s.expiresAt || s.expiresAt > now));
   }
   seedCount() { return Object.values(this.inventory).reduce((a, b) => a + (b || 0), 0); }
   cropDemand() {

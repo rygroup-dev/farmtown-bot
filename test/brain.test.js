@@ -23,7 +23,7 @@ test('hoes grass then plants when seeds available', () => {
   assert.ok(kinds.includes('hoe'));
 });
 
-test('planClaims emits starter, completable orders, claimable jobs', () => {
+test('planClaims emits falling stars, starter, completable orders, claimable jobs', () => {
   const s = new GameState();
   s.starterTasks = { currentTaskId: 'task1', completed: [] };
   s.orders = [
@@ -35,15 +35,20 @@ test('planClaims emits starter, completable orders, claimable jobs', () => {
     { id:'j1', current:10, target:10, rewards:{gold:20,xp:5} },
     { id:'j2', current:1, target:5, rewards:{gold:10,xp:3} }
   ];
+  s.fallingStars = [{ id: 'fs1', status: 'spawned', expiresAt: Date.now() + 60000 }];
   const plan = planClaims(s);
-  assert.strictEqual(plan.length, 3); // starter + 1 order + 1 job
-  assert.strictEqual(plan[0].kind, 'starter');
-  assert.strictEqual(plan[0].event, 'starter:complete/request');
-  assert.strictEqual(plan[0].payload.taskId, 'task1');
-  assert.strictEqual(plan[1].kind, 'order');
-  assert.strictEqual(plan[1].payload.orderId, 'o1');
-  assert.strictEqual(plan[2].kind, 'job');
-  assert.strictEqual(plan[2].payload.jobId, 'j1');
+  assert.strictEqual(plan.length, 4); // falling star + starter + 1 order + 1 job
+  assert.strictEqual(plan[0].kind, 'fallingStar');
+  assert.strictEqual(plan[0].event, 'game:action');
+  assert.strictEqual(plan[0].payload.action, 'claimFallingStar');
+  assert.strictEqual(plan[0].payload.fallingStarId, 'fs1');
+  assert.strictEqual(plan[1].kind, 'starter');
+  assert.strictEqual(plan[1].event, 'starter:complete/request');
+  assert.strictEqual(plan[1].payload.taskId, 'task1');
+  assert.strictEqual(plan[2].kind, 'order');
+  assert.strictEqual(plan[2].payload.orderId, 'o1');
+  assert.strictEqual(plan[3].kind, 'job');
+  assert.strictEqual(plan[3].payload.jobId, 'j1');
 });
 
 test('planClaims returns empty when nothing claimable', () => {

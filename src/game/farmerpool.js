@@ -1,13 +1,16 @@
 // Farmer's Pool — the $FARM-token earn mechanism (REST, not socket).
 // Reverse-engineered: GET /api/rewards/farmer-pool/status →
 //   { config:{enabled,minLevel,goldPerPower,farmPointsPerPower,claimPowerPerBurnedLevel},
-//     pool:{status:'active'|'paused'|'closed', poolDate, ...},
-//     player:{level,gold,availableFarmPoints,burnableLevels,hasContributionToday,...} }
+//     pool:{status:'active'|'paused'|'closed', poolDate, opensAt, closesAt, ...},
+//     player:{level,gold,availableFarmPoints,burnableLevels,hasContributionToday,...},
+//     earlyBird:{active,bonus,endsAt} }
 // POST /api/rewards/farmer-pool/claim
 //   body { actionId, goldToBurn, farmPointsToBurn, levelsToBurn }
-// Each unit of "claim power" = goldToBurn/goldPerPower + farmPointsToBurn/farmPointsPerPower
-//   + levelsToBurn*claimPowerPerBurnedLevel. Pool splits ~4.4M FARM/day by share of power.
+// Crop sacrifice (starfruit=2 power, crystal_berry=1 power) is UI-only for now —
+// the REST endpoint doesn't accept cropSacrifices yet. When it does, we're ready.
 import { log } from '../logger.js';
+
+export const SACRIFICE_CROPS = { starfruit: 2, crystal_berry: 1 };
 
 function poolActionId() {
   return `farmer-pool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -18,28 +21,33 @@ export async function pollFarmerPool(rest) {
   return r.status === 200 ? r.json : null;
 }
 
+export function poolTiming(status) {
+  const pool = status?.pool;
+  if (!pool) return null;
+  const now = Date.now();
+  const opensAt = pool.opensAt ? Date.parse(pool.opensAt) : null;
+  const closesAt = pool.closesAt ? Date.parse(pool.closesAt) : null;
+  const eb = status.earlyBird;
+  const earlyBirdEndsAt = eb?.endsAt ? Date.parse(eb.endsAt) : null;
+  return {
+    opensAt, closesAt, earlyBirdEndsAt,
+    isOpen: opensAt && closesAt ? (now >= opensAt && now < closesAt) : false,
+    isEarlyBird: eb?.active || (earlyBirdEndsAt ? now < earlyBirdEndsAt : false),
+    msUntilOpen: opensAt ? Math.max(0, opensAt - now) : null,
+    msUntilClose: closesAt ? Math.max(0, closesAt - now) : null,
+    msUntilEarlyBirdEnd: earlyBirdEndsAt ? Math.max(0, earlyBirdEndsAt - now) : null,
+  };
+}
+
 // Pure decision — the bot's pool strategy, encoded.
-//
-// Economics (reverse-engineered): the daily pool (~4.4M FARM) is split by each player's
-// share of total "claim power". Power is bought by burning one of three things:
-//   • farm points — 100 FP = 1 power. A FREE byproduct of farming → always burn.
-//   • gold        — 250k gold = 1 power. Has farming utility → only burn true surplus.
-//   • levels      — 1 level = 3 power, but ~$0.06 each and DESTRUCTIVE (drops crop
-//                   unlocks → worse income). A trap. NEVER burn unless explicitly opted in.
-//
-// Two correctness rules baked in:
-//   1) Contribute REPEATEDLY (top players do 150-260x/day) — share is the TOTAL power
-//      accumulated over the day, so we never stop after the first contribution.
-//   2) Burn only in WHOLE-power multiples (exactly like the game UI's power sliders) so
-//      no farm points or gold are ever wasted on sub-power rounding; the remainder
-//      (<1 power) is kept and accumulates for the next contribution.
-export function decideContribution(status, { burnGold = false, goldReserve = 100000, burnLevels = false, levelFloor = 10, sacrificeAt = 0, currentLevel = null } = {}) {
+export function decideContribution(status, { burnGold = false, goldReserve = 100000, burnLevels = false, levelFloor = 10, sacrificeAt = 0, currentLevel = null, cropInventory = null } = {}) {
   const cfg = status?.config, pool = status?.pool, player = status?.player;
   if (!cfg?.enabled) return null;
   if (!pool || pool.status !== 'active') return null;
-  // Eligibility: trust the server's `unlocked` flag (authoritative). The pool's
-  // player.level can be a STALE cached value (observed level 2 while xp says L11),
-  // so don't gate on it when the server already reports unlocked.
+
+  const timing = poolTiming(status);
+  if (timing?.opensAt && !timing.isOpen) return null;
+
   const eligible = player?.unlocked === true || (player?.level || 0) >= (cfg.minLevel || 30);
   if (!eligible) return null;
   if (player?.meetsStarGate === false) return null;
@@ -51,10 +59,6 @@ export function decideContribution(status, { burnGold = false, goldReserve = 100
   const farmPointsToBurn = floorTo(player.availableFarmPoints || 0, fpPer);
   const goldToBurn = burnGold ? floorTo(Math.max(0, (player.gold || 0) - goldReserve), goldPer) : 0;
 
-  // Level SACRIFICE (opt-in): convert otherwise-wasted post-cap XP into claim power.
-  // Hard guardrails — never burn below `levelFloor`, never more than the server allows
-  // (burnableLevels), and only once an account has reached `sacrificeAt` (e.g. max L30).
-  // Prefer the live `currentLevel` over the pool's sometimes-stale cached player.level.
   let levelsToBurn = 0;
   if (burnLevels) {
     const lvl = currentLevel ?? player.level ?? 0;
@@ -63,8 +67,24 @@ export function decideContribution(status, { burnGold = false, goldReserve = 100
     }
   }
 
-  if (farmPointsToBurn + goldToBurn + levelsToBurn <= 0) return null; // nothing worth a whole power yet
+  if (farmPointsToBurn + goldToBurn + levelsToBurn <= 0) return null;
   return { farmPointsToBurn, goldToBurn, levelsToBurn };
+}
+
+// Compute how many sacrifice crops the bot should burn for extra pool power.
+// Returns { starfruit: N, crystal_berry: N } with total power estimate.
+export function decideCropSacrifice(cropInventory = {}, { reservePerCrop = 5 } = {}) {
+  const crops = {};
+  let totalPower = 0;
+  for (const [cropId, powerEach] of Object.entries(SACRIFICE_CROPS)) {
+    const have = cropInventory[cropId] || 0;
+    const toBurn = Math.max(0, have - reservePerCrop);
+    if (toBurn > 0) {
+      crops[cropId] = toBurn;
+      totalPower += toBurn * powerEach;
+    }
+  }
+  return totalPower > 0 ? { crops, totalPower } : null;
 }
 
 export async function claimFarmerPool(rest, contribution) {
@@ -77,12 +97,16 @@ export async function maybeContribute(rest, opts = {}) {
   try {
     const status = await pollFarmerPool(rest);
     if (!status) return { ok: false, reason: 'status-unavailable' };
+
+    const timing = poolTiming(status);
     const c = decideContribution(status, opts);
-    if (!c) return { ok: true, contributed: false, pool: status.pool?.status, level: status.player?.level };
+    if (!c) return { ok: true, contributed: false, pool: status.pool?.status, level: status.player?.level, timing };
+
     const r = await claimFarmerPool(rest, c);
     const ok = r.status === 200 && r.json?.ok !== false;
-    log.info('FARMPOOL', `claim gold=${c.goldToBurn} points=${c.farmPointsToBurn} levels=${c.levelsToBurn} -> ${ok ? 'OK' : 'FAIL ' + r.status}`);
-    return { ok, contributed: ok, result: r.json };
+    const earlyTag = timing?.isEarlyBird ? ' [EARLY BIRD +10%]' : '';
+    log.info('FARMPOOL', `claim gold=${c.goldToBurn} points=${c.farmPointsToBurn} levels=${c.levelsToBurn}${earlyTag} -> ${ok ? 'OK' : 'FAIL ' + r.status}`);
+    return { ok, contributed: ok, result: r.json, timing };
   } catch (e) {
     log.warn('FARMPOOL', e.message);
     return { ok: false, reason: e.message };

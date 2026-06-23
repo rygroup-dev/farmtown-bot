@@ -53,7 +53,7 @@ export class ActionRunner {
       await sleep(gaussianDelay(120, 350));
     }
     if (meta && payload.tileX != null) await this._walkTo(payload.tileX, payload.tileY);
-    const id = mkActionId(meta?.action || 'act');
+    const id = mkActionId(payload.action || meta?.action || 'act');
     const full = {
       roomId: config.roomId,
       ...payload,
@@ -69,7 +69,6 @@ export class ActionRunner {
         tileY: payload.tileY,
       });
       full.action = meta.action;
-      // top-level selectedTool/selectedSeedId added by the 2026-06 game update
       full.selectedTool = meta.tool;
       full.selectedSeedId = meta.seedId || 'none';
     }

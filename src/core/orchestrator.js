@@ -12,7 +12,7 @@ import { GameState } from '../game/state.js';
 import { ActionRunner } from '../game/actions.js';
 import { planActions, planClaims, planStorage } from '../game/brain.js';
 import { loadEconomy } from '../game/economy.js';
-import { maybeContribute, pollFarmerPool } from '../game/farmerpool.js';
+import { maybeContribute, pollFarmerPool, poolTiming, decideCropSacrifice, SACRIFICE_CROPS } from '../game/farmerpool.js';
 import { getWalletInfo, withdrawFarm, buyStars, sendFarmTo, sendSolTo, getPendingStars, retryPendingStar } from '../game/wallet_info.js';
 import { buildRoster, generateSubWallets, parseSecret, loadSubWallets, MAX_SUB_WALLETS } from '../wallets.js';
 import { withinActiveHours, secondsUntilInactive, sleep, gaussianDelay, maybeBreak } from '../safety/humanizer.js';
@@ -309,9 +309,14 @@ export async function runAccount(account = {}) {
         else tg.notify(`${tag}🟢 joined farm — level ${state.level} • gold ${state.gold}`);
       }
       if (ev === 'game:actionResult' && data.ok) log.info('ACT', (data.type || '?') + ' ok' + (data.message ? (' — ' + data.message) : ''));
+      if (ev === 'game:actionResult' && data.ok && data.fallingStar?.status === 'claimed') {
+        const reward = data.fallingStar.rewardStars || 0;
+        log.info('STAR', `${tag}⭐ Falling star claimed! +${reward} star(s) → total ${state.stars}`);
+        tg.notify(`${tag}⭐ Falling star collected! +${reward} star(s) (total: ${state.stars})`);
+      }
       if (ev === 'game:error' || ev === 'farm:error') log.warn('GAMEERR', (data.code || '?') + ' ' + (data.message || ''));
       if (ev === 'game:actionResult' && data.ok) lastActionAt = Date.now();
-      if (ev === 'player:farmState/sync') { const now = Date.now(); if (now - lastStateLog >= 30000) { lastStateLog = now; log.info('STATE', `gold=${state.gold} lvl=${state.level} stars=${state.stars} | owned=${state.ownedTiles().length} grass=${state.grassEmpty().length} tilled=${state.tilledEmpty().length} ready=${state.readyToHarvest().length} dead=${state.deadCrops().length} blocked=${state.blocked().length} expandable=${state.expandableTiles().length} orders=${state.completableOrders().length}/${state.orders.length} jobs=${state.claimableJobs().length}`); } }
+      if (ev === 'player:farmState/sync') { const now = Date.now(); if (now - lastStateLog >= 30000) { lastStateLog = now; log.info('STATE', `gold=${state.gold} lvl=${state.level} stars=${state.stars} | owned=${state.ownedTiles().length} grass=${state.grassEmpty().length} tilled=${state.tilledEmpty().length} ready=${state.readyToHarvest().length} dead=${state.deadCrops().length} blocked=${state.blocked().length} expandable=${state.expandableTiles().length} orders=${state.completableOrders().length}/${state.orders.length} jobs=${state.claimableJobs().length} fallingStars=${state.claimableFallingStars().length}`); } }
     });
     let lastQueueLog = 0, queuedNotified = false;
     gs.on('queue', (d) => {
@@ -477,30 +482,63 @@ export async function runAccount(account = {}) {
   // Farmer's Pool earn loop: contribute claim power to earn $FARM.
   // Server requires minLevel=30 + star gate (3 stars minimum).
   // Contribute repeatedly (~10 min) so share keeps climbing.
-  let poolNotified = false, poolLastSummary = 0, starGateWarned = false;
+  // Pool-timing-aware: polls faster near opensAt, notifies about early bird window.
+  let poolNotified = false, poolLastSummary = 0, starGateWarned = false, poolOpenNotified = false, earlyBirdNotified = false;
   (async function farmerPoolLoop() {
     while (flags.running) {
-      await sleep(gaussianDelay(540000, 660000)); // ~10 min
-      if (!config.pool.enabled || !flags.connected || state.level < 30) continue;
+      if (!config.pool.enabled || !flags.connected || state.level < 30) {
+        await sleep(gaussianDelay(540000, 660000));
+        continue;
+      }
       try {
         const status = await pollFarmerPool(rest);
         if (status?.player && !status.player.meetsStarGate && !starGateWarned) {
           starGateWarned = true;
-          tg.notify(`⚠️ Pool star gate: need ${status.player.minStarsToEnter || 3} stars (have ${status.player.starsPurchasedThisEvent || 0}). Buy stars via /wallet to unlock pool.`);
+          tg.notify(`${tag}⚠️ Pool star gate: need ${status.player.minStarsToEnter || 3} stars (have ${status.player.starsPurchasedThisEvent || 0}). Collect falling stars or buy via /starmain to unlock pool.`);
         }
         if (status?.player?.meetsStarGate) starGateWarned = false;
+
+        const timing = poolTiming(status);
+        if (timing) {
+          if (!timing.isOpen && timing.msUntilOpen != null && timing.msUntilOpen > 0) {
+            if (!poolOpenNotified) {
+              const hrs = Math.round(timing.msUntilOpen / 3600000 * 10) / 10;
+              if (hrs <= 24) tg.notify(`${tag}🏊 Pool opens in ${hrs}h (${new Date(timing.opensAt).toISOString()}). Early bird +10% in first 6h!`);
+              poolOpenNotified = true;
+            }
+            const waitMs = Math.min(timing.msUntilOpen + 5000, gaussianDelay(540000, 660000));
+            await sleep(waitMs);
+            continue;
+          }
+          if (timing.isOpen && timing.isEarlyBird && !earlyBirdNotified) {
+            earlyBirdNotified = true;
+            const mins = Math.round((timing.msUntilEarlyBirdEnd || 0) / 60000);
+            tg.notify(`${tag}🐦 Pool EARLY BIRD active! +10% power bonus for ${mins} more minutes. Auto-contributing now.`);
+          }
+        }
       } catch {}
-      const r = await maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level });
+
+      const cropSac = decideCropSacrifice(state.cropInventory);
+      if (cropSac) {
+        const parts = Object.entries(cropSac.crops).map(([c, n]) => `${n} ${c}`).join(', ');
+        log.info('FARMPOOL', `${tag}crop sacrifice available: ${parts} = +${cropSac.totalPower} power (NOT sent yet — REST endpoint doesn't accept crops)`);
+      }
+
+      const r = await maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level, cropInventory: state.cropInventory });
       if (r?.contributed) {
         const now = Date.now();
-        if (!poolNotified) { poolNotified = true; poolLastSummary = now; tg.notify("💎 Farmer's Pool is open — auto-contributing free farm points to earn $FARM. /pool for details."); }
-        else if (now - poolLastSummary > 7200000) { // ~2h summary
+        const earlyTag = r.timing?.isEarlyBird ? ' [EARLY BIRD]' : '';
+        if (!poolNotified) { poolNotified = true; poolLastSummary = now; tg.notify(`${tag}💎 Farmer's Pool is open${earlyTag} — auto-contributing to earn $FARM. /pool for details.`); }
+        else if (now - poolLastSummary > 7200000) {
           poolLastSummary = now;
-          try { const st = await pollFarmerPool(rest); const me = st?.player; if (me) tg.notify(`💎 Pool today: power ${me.contributedClaimPowerToday || 0} • est. payout ${(Number(me.estimatedPayoutRaw || 0) / 1e6).toFixed(2)} $FARM`); } catch {}
+          try { const st = await pollFarmerPool(rest); const me = st?.player; if (me) tg.notify(`${tag}💎 Pool today: power ${me.contributedClaimPowerToday || 0} • est. payout ${(Number(me.estimatedPayoutRaw || 0) / 1e6).toFixed(2)} $FARM${earlyTag}`); } catch {}
         }
       } else if (r?.pool && r.pool !== 'active') {
-        poolNotified = false;
+        poolNotified = false; poolOpenNotified = false; earlyBirdNotified = false;
       }
+
+      const loopDelay = r?.timing?.isEarlyBird ? gaussianDelay(240000, 360000) : gaussianDelay(540000, 660000);
+      await sleep(loopDelay);
     }
   })();
 
