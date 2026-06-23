@@ -30,6 +30,10 @@ export const COMMAND_MENU = [
   ['genwallets', '<n> generate sub-wallets'],
   ['mintsession', 'Test captcha auto-login'],
   ['sweep', 'Send all sub $FARM → main'],
+  ['starmain', '<bundle> buy stars for main'],
+  ['starsub', '<bundle> buy stars all subs'],
+  ['sendfarm', '<amount> send FARM to all subs'],
+  ['sendfee', '<SOL> send SOL gas to all subs'],
   ['start', 'Start the bot'],
   ['stop', 'Stop the bot'],
   ['pause', 'Pause autopilot'],
@@ -157,19 +161,25 @@ export async function dispatchCommand(text, ctx, send) {
         const px = Number(p.tokenUsdPrice || 0);
         const farmDay = Number(pool.totalTokensAllocatedRaw || 0) / 1e6;
         const payout = Number(player.estimatedPayoutRaw || 0) / 1e6;
-        const unlocked = player.unlocked || (player.level || 0) >= (cfg.minLevel || 10);
+        const unlocked = player.unlocked || (player.level || 0) >= (cfg.minLevel || 30);
+        const starGate = player.meetsStarGate !== false;
         const perPower = pool.totalClaimPower > 0 ? farmDay / pool.totalClaimPower : 0;
         const usd = (farm) => px > 0 ? ` (~$${(farm * px).toFixed(2)})` : '';
         const fpPower = Math.floor((player.availableFarmPoints || 0) / (cfg.farmPointsPerPower || 100));
+        const lvlBurn = player.burnableLevels || 0;
+        const minAfter = cfg.minLevelAfterBurn || 30;
+        const eligLine = !unlocked ? `🔒 needs L${cfg.minLevel || 30}` : !starGate ? `🔒 needs ${player.minStarsToEnter || 3}⭐ (buy via /wallet)` : '✅ eligible';
         return send(
           `🏊 <b>Farmer Pool</b> ($${sym})\n` +
-          `Status: <b>${esc(pool.status || 'unknown')}</b> • Date: ${esc(pool.poolDate || 'n/a')}\n` +
+          `Status: <b>${esc(pool.status || 'unknown')}</b> • Enabled: ${cfg.enabled ? '✅' : '❌'} • Date: ${esc(pool.poolDate || 'n/a')}\n` +
           `Pool/day: ${fmt(farmDay)} ${sym}${usd(farmDay)} • Farmers: ${fmt(pool.activeParticipantCount)}\n` +
           `Price: $${px ? px.toFixed(6) : '?'} • Value/power: ${perPower.toFixed(2)} ${sym}${usd(perPower)}\n` +
-          `\n<b>You</b> — L${fmt(player.level)} • ${unlocked ? '✅ eligible' : `🔒 needs L${cfg.minLevel || 10}`}\n` +
+          `\n<b>You</b> — L${fmt(player.level)} • ${eligLine}\n` +
           `Farm points: ${fmt(player.availableFarmPoints)} (= ${fpPower} power ready, free)\n` +
-          `Power today: ${fmt(player.contributedClaimPowerToday)} • Est. payout: ${payout.toFixed(2)} ${sym}${usd(payout)}\n` +
-          `\n<i>Strategy: auto-burns free farm points every ~10 min. Gold burn: /poolburn on (surplus only). Levels are never sacrificed (bad value).</i>`
+          `Sacrifice: ${lvlBurn} levels burnable (floor L${minAfter}) • Stars: ${player.starsPurchasedThisEvent || 0}/${player.minStarsToEnter || 3}⭐\n` +
+          `Power today: ${fmt(player.contributedClaimPowerToday)} • Multiplier: ${player.powerMultiplier || 1}x\n` +
+          `Est. payout: ${payout.toFixed(2)} ${sym}${usd(payout)} • FARM held: ${fmt(player.farmHeld || 0)} (need ${fmt(player.minFarmToHold || 0)})\n` +
+          `\n<i>Strategy: auto-burns farm points every ~10 min. Gold burn: /poolburn on. Level sacrifice: burn ${lvlBurn} levels (L${player.level}→L${minAfter}). Stars: buy via /wallet deposit.</i>`
         );
       }
       case '/economy':
@@ -219,6 +229,64 @@ export async function dispatchCommand(text, ctx, send) {
         const sent = ok.reduce((s, r) => s + (r.amount || 0), 0);
         const lines = res.map(r => `${r.ok ? '✅' : '⚠️'} ${esc(r.label)}: ${r.ok ? fmt(r.amount) + ' FARM' : esc(r.reason || 'skip')}`);
         return send(`🧹 <b>Sweep done</b> — ${ok.length}/${res.length} sent, ${fmt(sent)} $FARM → main.\n${lines.join('\n')}`);
+      }
+
+      case '/starmain': {
+        if (!ctx.buyStarsMain) return send('⭐ Not available.');
+        const bundle = (args[0] || '').toLowerCase();
+        const valid = ['starter', 'small', 'medium', 'large', 'degen'];
+        if (!valid.includes(bundle)) return send(`⭐ Usage: <code>/starmain ${valid.join('|')}</code>\n\nBundles:\n• starter — 3⭐ (~$5)\n• small — 20⭐ (~$20)\n• medium — 65⭐ (~$50)\n• large — 160⭐ (~$100)\n• degen — 425⭐ (~$250)`);
+        await send(`⭐ Buying <b>${esc(bundle)}</b> stars for <b>main</b>…`);
+        const r = await ctx.buyStarsMain(bundle);
+        if (r.ok) return send(`⭐ ✅ <b>Main</b>: bought ${r.stars}⭐ — spent ${fmt(Math.floor(r.farmSpent))} FARM\nTx: <code>${esc(r.sig?.slice(0, 20))}…</code>`);
+        return send(`⭐ ❌ <b>Main</b> failed: ${esc(r.reason)}`);
+      }
+      case '/starsub': {
+        if (!ctx.buyStarsSub) return send('⭐ Not available.');
+        const bundle = (args[0] || '').toLowerCase();
+        const valid = ['starter', 'small', 'medium', 'large', 'degen'];
+        if (!valid.includes(bundle)) return send(`⭐ Usage: <code>/starsub ${valid.join('|')}</code>\n\nBundles:\n• starter — 3⭐ (~$5)\n• small — 20⭐ (~$20)\n• medium — 65⭐ (~$50)\n• large — 160⭐ (~$100)\n• degen — 425⭐ (~$250)`);
+        await send(`⭐ Buying <b>${esc(bundle)}</b> stars for <b>all subs</b>… this may take a while.`);
+        const results = await ctx.buyStarsSub(bundle);
+        if (!results.length) return send('⭐ No sub accounts running.');
+        const ok = results.filter(r => r.ok);
+        const fail = results.filter(r => !r.ok);
+        const totalFarm = ok.reduce((s, r) => s + (r.farmSpent || 0), 0);
+        let msg = `⭐ <b>Stars bought for subs</b>\n✅ ${ok.length} OK • ❌ ${fail.length} failed • 🌾 ${fmt(Math.floor(totalFarm))} FARM spent\n`;
+        if (fail.length && fail.length <= 10) msg += '\nFailed:\n' + fail.map(r => `• ${esc(r.label)}: ${esc(r.reason)}`).join('\n');
+        else if (fail.length > 10) msg += `\nFirst failures: ${fail.slice(0, 5).map(r => `${esc(r.label)}: ${esc(r.reason)}`).join(', ')}…`;
+        return send(msg);
+      }
+      case '/sendfarm': {
+        if (!ctx.sendFarmToSubs) return send('🌾 Not available.');
+        const amount = Number(args[0]);
+        if (!Number.isFinite(amount) || amount <= 0) return send('🌾 Usage: <code>/sendfarm &lt;amount&gt;</code> — send FARM from main to each sub.\nExample: /sendfarm 2000');
+        await send(`🌾 Sending <b>${fmt(amount)}</b> FARM to each sub…`);
+        const results = await ctx.sendFarmToSubs(amount);
+        if (!results.length) return send('🌾 No sub wallets.');
+        const ok = results.filter(r => r.ok);
+        const fail = results.filter(r => !r.ok);
+        const total = ok.length * amount;
+        let msg = `🌾 <b>FARM distribution</b>\n✅ ${ok.length} sent • ❌ ${fail.length} failed • Total: ${fmt(total)} FARM\n`;
+        if (fail.length && fail.length <= 10) msg += '\nFailed:\n' + fail.map(r => `• ${esc(r.label)}: ${esc(r.reason)}`).join('\n');
+        else if (fail.length > 10) msg += `\n${fail.length} failed (check /log)`;
+        return send(msg);
+      }
+      case '/sendfee': {
+        if (!ctx.sendSolToSubs) return send('◎ Not available.');
+        const sol = Number(args[0]);
+        if (!Number.isFinite(sol) || sol <= 0) return send('◎ Usage: <code>/sendfee &lt;SOL&gt;</code> — send SOL from main to each sub for gas.\nExample: /sendfee 0.002');
+        const lamports = Math.floor(sol * 1e9);
+        await send(`◎ Sending <b>${sol}</b> SOL to each sub…`);
+        const results = await ctx.sendSolToSubs(lamports);
+        if (!results.length) return send('◎ No sub wallets.');
+        const ok = results.filter(r => r.ok);
+        const fail = results.filter(r => !r.ok);
+        const total = ok.length * sol;
+        let msg = `◎ <b>SOL gas distribution</b>\n✅ ${ok.length} sent • ❌ ${fail.length} failed • Total: ${total.toFixed(4)} SOL\n`;
+        if (fail.length && fail.length <= 10) msg += '\nFailed:\n' + fail.map(r => `• ${esc(r.label)}: ${esc(r.reason)}`).join('\n');
+        else if (fail.length > 10) msg += `\n${fail.length} failed (check /log)`;
+        return send(msg);
       }
 
       case '/start': ctx.flags.running = true; ctx.flags.paused = false; return send('🚀 <b>Started</b>');
@@ -310,7 +378,8 @@ export async function dispatchCommand(text, ctx, send) {
         return send(
           `📖 <b>FarmTown Sentinel</b>\n\n` +
           `<b>INFO</b> /status /balance /farm /inventory /basket /orders /jobs /quests /mastery /stats /pool /economy /wallet\n\n` +
-          `<b>MULTI-ACCOUNT</b> /accounts /genwallets /mintsession /sweep\n\n` +
+          `<b>MULTI-ACCOUNT</b> /accounts /genwallets /mintsession /sweep\n` +
+          `<b>STARS &amp; FUND</b> /starmain /starsub /sendfarm /sendfee\n\n` +
           `<b>CONTROL</b> /start /stop /pause /resume /autopilot /objective /setcrop /reserve /sethours /poolburn\n\n` +
           `<b>ACTIONS</b> /harvest /plant /plantall /buyplot /buyseed /upgradestorage /claimpool /auth /reconnect /restart\n\n` +
           `<b>DIAG</b> /log /ping /help`

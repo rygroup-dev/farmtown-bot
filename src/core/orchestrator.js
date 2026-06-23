@@ -13,7 +13,7 @@ import { ActionRunner } from '../game/actions.js';
 import { planActions, planClaims, planStorage } from '../game/brain.js';
 import { loadEconomy } from '../game/economy.js';
 import { maybeContribute, pollFarmerPool } from '../game/farmerpool.js';
-import { getWalletInfo, withdrawFarm } from '../game/wallet_info.js';
+import { getWalletInfo, withdrawFarm, buyStars, sendFarmTo, sendSolTo } from '../game/wallet_info.js';
 import { buildRoster, generateSubWallets, parseSecret, loadSubWallets, MAX_SUB_WALLETS } from '../wallets.js';
 import { withinActiveHours, secondsUntilInactive, sleep, gaussianDelay, maybeBreak } from '../safety/humanizer.js';
 import { startTelegram } from '../telegram/bot.js';
@@ -152,13 +152,19 @@ export async function runAccount(account = {}) {
       } catch (e) { return { ok: false, reason: e.message }; }
     },
     accountsInfo: async () => {
+      const roster = buildRoster(config.keypair);
+      const BATCH = 10;
       const out = [];
-      for (const a of buildRoster(config.keypair)) {
-        let info = { sol: 0, farm: 0 };
-        try { info = await getWalletInfo(a.keypair); } catch { /* RPC may fail */ }
-        const e = reg.get(a.label); // live farm state if this account's engine is running
-        out.push({ label: a.label, address: a.address, isMain: a.isMain, sol: info.sol, farm: info.farm,
-          running: !!e, connected: !!e?.flags?.connected, level: e?.state?.level, gold: e?.state?.gold });
+      for (let i = 0; i < roster.length; i += BATCH) {
+        const batch = roster.slice(i, i + BATCH);
+        const results = await Promise.allSettled(batch.map(a => getWalletInfo(a.keypair)));
+        for (let j = 0; j < batch.length; j++) {
+          const a = batch[j];
+          const info = results[j].status === 'fulfilled' ? results[j].value : { sol: 0, farm: 0 };
+          const e = reg.get(a.label);
+          out.push({ label: a.label, address: a.address, isMain: a.isMain, sol: info.sol, farm: info.farm,
+            running: !!e, connected: !!e?.flags?.connected, level: e?.state?.level, gold: e?.state?.gold });
+        }
       }
       return out;
     },
@@ -175,6 +181,36 @@ export async function runAccount(account = {}) {
       return res;
     },
     starBundles: async () => { const r = await rest.req('/api/token/stars/bundles', { timeoutMs: 20000 }); return r.json?.bundles || []; },
+    buyStarsMain: (bundleId) => buyStars(rest, bundleId, keypair),
+    buyStarsSub: async (bundleId) => {
+      const results = [];
+      for (const [lbl, engine] of reg) {
+        if (engine.isMain) continue;
+        try {
+          const r = await buyStars(engine.rest, bundleId, engine.keypair);
+          results.push({ label: lbl, ...r });
+        } catch (e) { results.push({ label: lbl, ok: false, reason: e.message }); }
+      }
+      return results;
+    },
+    sendFarmToSubs: async (amountPerSub) => {
+      const results = [];
+      for (const a of buildRoster(config.keypair)) {
+        if (a.isMain) continue;
+        const r = await sendFarmTo(a.address, amountPerSub, keypair);
+        results.push({ label: a.label, address: a.address, ...r });
+      }
+      return results;
+    },
+    sendSolToSubs: async (lamportsPerSub) => {
+      const results = [];
+      for (const a of buildRoster(config.keypair)) {
+        if (a.isMain) continue;
+        const r = await sendSolTo(a.address, lamportsPerSub, keypair);
+        results.push({ label: a.label, address: a.address, ...r });
+      }
+      return results;
+    },
     manual: (kind, arg) => manualQueue.push({ kind, arg }),
     // Paste a fresh Supabase session from Telegram → write it + force an immediate
     // re-login. Lets the user recover from a truly-dead refresh token in ~10s without
@@ -207,7 +243,7 @@ export async function runAccount(account = {}) {
   // Only the MAIN account runs the Telegram bot; sub accounts are headless farmers that
   // share the main bot's notifier and report into the shared registry (for /accounts).
   const tg = isMain ? startTelegram(ctx) : (sharedTg || { notify() {} });
-  reg.set(label, { label, isMain, addr, state, flags, stats });
+  reg.set(label, { label, isMain, addr, state, flags, stats, rest, keypair });
 
   // Re-auth on (re)connect. Refresh Supabase only when its JWT is near expiry, and
   // REUSE the existing wallet session token until it's near its own 30-min expiry —
@@ -418,16 +454,22 @@ export async function runAccount(account = {}) {
     }
   })();
 
-  // Farmer's Pool earn loop: once at L10+ and the daily pool is open, contribute claim
-  // power (farm points by default; gold only if POOL_BURN_GOLD=on) to earn $FARM.
-  // Contribute repeatedly (~every 10 min ≈ 144x/day, in line with top players) so our
-  // share keeps climbing. Notify only the FIRST contribution per pool-open + a periodic
-  // summary — never every cycle (would spam). Resets when the pool isn't active.
-  let poolNotified = false, poolLastSummary = 0;
+  // Farmer's Pool earn loop: contribute claim power to earn $FARM.
+  // Server requires minLevel=30 + star gate (3 stars minimum).
+  // Contribute repeatedly (~10 min) so share keeps climbing.
+  let poolNotified = false, poolLastSummary = 0, starGateWarned = false;
   (async function farmerPoolLoop() {
     while (flags.running) {
       await sleep(gaussianDelay(540000, 660000)); // ~10 min
-      if (!config.pool.enabled || !flags.connected || state.level < 10) continue;
+      if (!config.pool.enabled || !flags.connected || state.level < 30) continue;
+      try {
+        const status = await pollFarmerPool(rest);
+        if (status?.player && !status.player.meetsStarGate && !starGateWarned) {
+          starGateWarned = true;
+          tg.notify(`⚠️ Pool star gate: need ${status.player.minStarsToEnter || 3} stars (have ${status.player.starsPurchasedThisEvent || 0}). Buy stars via /wallet to unlock pool.`);
+        }
+        if (status?.player?.meetsStarGate) starGateWarned = false;
+      } catch {}
       const r = await maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level });
       if (r?.contributed) {
         const now = Date.now();
@@ -437,7 +479,7 @@ export async function runAccount(account = {}) {
           try { const st = await pollFarmerPool(rest); const me = st?.player; if (me) tg.notify(`💎 Pool today: power ${me.contributedClaimPowerToday || 0} • est. payout ${(Number(me.estimatedPayoutRaw || 0) / 1e6).toFixed(2)} $FARM`); } catch {}
         }
       } else if (r?.pool && r.pool !== 'active') {
-        poolNotified = false; // pool closed/paused → re-announce when it next opens
+        poolNotified = false;
       }
     }
   })();

@@ -40,8 +40,9 @@ export function decideContribution(status, { burnGold = false, goldReserve = 100
   // Eligibility: trust the server's `unlocked` flag (authoritative). The pool's
   // player.level can be a STALE cached value (observed level 2 while xp says L11),
   // so don't gate on it when the server already reports unlocked.
-  const eligible = player?.unlocked === true || (player?.level || 0) >= (cfg.minLevel || 10);
+  const eligible = player?.unlocked === true || (player?.level || 0) >= (cfg.minLevel || 30);
   if (!eligible) return null;
+  if (player?.meetsStarGate === false) return null;
 
   const fpPer = cfg.farmPointsPerPower || 100;
   const goldPer = cfg.goldPerPower || 250000;
