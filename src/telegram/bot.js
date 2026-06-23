@@ -34,6 +34,7 @@ export const COMMAND_MENU = [
   ['starsub', '<bundle> buy stars all subs'],
   ['sendfarm', '<amount> send FARM to all subs'],
   ['sendfee', '<SOL> send SOL gas to all subs'],
+  ['subacc', 'Sub account details'],
   ['retrystar', 'Retry pending star purchases'],
   ['start', 'Start the bot'],
   ['stop', 'Stop the bot'],
@@ -205,6 +206,19 @@ export async function dispatchCommand(text, ctx, send) {
         const totFarm = list.reduce((s, a) => s + (a.farm || 0), 0);
         const totSol = list.reduce((s, a) => s + (a.sol || 0), 0);
         return send(`👥 <b>Accounts ${list.length}/${max}</b>\n${lines.join('\n')}\n\nTotal: ◎${totSol.toFixed(3)} SOL • 🌾${fmt(Math.floor(totFarm))} $FARM`);
+      }
+      case '/subacc': {
+        if (!ctx.registry) return send('👥 Multi-account not available.');
+        const subs = [...ctx.registry.values()].filter(e => !e.isMain);
+        if (!subs.length) return send('👥 No sub accounts running.');
+        const lines = subs.map(e => {
+          const s = e.state;
+          const owned = s?.ownedTiles?.()?.length ?? 0;
+          return `• <b>${esc(e.label)}</b> ${e.flags?.connected ? '🟢' : '🔴'}\n  L${fmt(s?.level)} • 💰${fmt(s?.gold)}g • ⭐${fmt(s?.stars)} stars\n  🏡 Plots: ${owned} • 🌾 Ready: ${s?.readyToHarvest?.()?.length ?? 0}`;
+        });
+        const totOwned = subs.reduce((s, e) => s + (e.state?.ownedTiles?.()?.length ?? 0), 0);
+        const totStars = subs.reduce((s, e) => s + (e.state?.stars ?? 0), 0);
+        return send(`👥 <b>Sub Accounts (${subs.length})</b>\n${lines.join('\n')}\n\n📊 Total: ${totOwned} plots • ${totStars}⭐ stars`);
       }
       case '/mintsession': {
         if (!ctx.testMint) return send('🧩 Not available in this build.');
@@ -391,8 +405,8 @@ export async function dispatchCommand(text, ctx, send) {
         return send(
           `📖 <b>FarmTown Sentinel</b>\n\n` +
           `<b>INFO</b> /status /balance /farm /inventory /basket /orders /jobs /quests /mastery /stats /pool /economy /wallet\n\n` +
-          `<b>MULTI-ACCOUNT</b> /accounts /genwallets /mintsession /sweep\n` +
-          `<b>STARS &amp; FUND</b> /starmain /starsub /sendfarm /sendfee\n\n` +
+          `<b>MULTI-ACCOUNT</b> /accounts /subacc /genwallets /mintsession /sweep\n` +
+          `<b>STARS &amp; FUND</b> /starmain /starsub /sendfarm /sendfee /retrystar\n\n` +
           `<b>CONTROL</b> /start /stop /pause /resume /autopilot /objective /setcrop /reserve /sethours /poolburn\n\n` +
           `<b>ACTIONS</b> /harvest /plant /plantall /buyplot /buyseed /upgradestorage /claimpool /auth /reconnect /restart\n\n` +
           `<b>DIAG</b> /log /ping /help`

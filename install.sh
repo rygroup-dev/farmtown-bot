@@ -116,8 +116,8 @@ WITHDRAW_ADDRESS=$WITHDRAW_ADDRESS
 # --- Farmer Pool strategy (optional) ---
 POOL_BURN_GOLD=off
 POOL_BURN_LEVELS=off
-POOL_LEVEL_FLOOR=13
-POOL_SACRIFICE_AT=30
+POOL_LEVEL_FLOOR=30
+POOL_SACRIFICE_AT=35
 
 # --- Multi-account (optional) — see README. Generate subs via Telegram /genwallets ---
 MULTI_ACCOUNT=off
@@ -189,7 +189,9 @@ else
 fi
 say ""
 say "Useful Telegram commands: ${B}/status /balance /pool /orders /auth /stop /start /help${X}"
-say "Multi-account (optional): ${B}/genwallets <n>${X} → set ${B}CAPTCHA_API_KEY${X} + ${B}MULTI_ACCOUNT=on${X} → restart."
-say "Run up to 50 farms from one bot; sub \$FARM auto-sweeps to your main wallet. See README."
+say "Stars & pool: ${B}/starmain starter${X} (buy 3⭐ main) · ${B}/starsub starter${X} (buy for all subs)"
+say "Fund subs: ${B}/sendfarm <amount>${X} (send FARM) · ${B}/sendfee <SOL>${X} (send gas)"
+say "Multi-account: ${B}/genwallets <n>${X} → set ${B}CAPTCHA_API_KEY${X} + ${B}MULTI_ACCOUNT=on${X} → restart."
+say "Run multiple farms from one bot; /subacc to monitor all sub-account stats. See README."
 say "Full guide: ${C}$DIR/README.md${X}"
 say "${B}════════════════════════ RY GROUP ════════════════════════${X}"
