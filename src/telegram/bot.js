@@ -186,7 +186,7 @@ export async function dispatchCommand(text, ctx, send) {
         if (!ctx.accountsInfo) return send('👥 Multi-account not available in this build.');
         await send('👥 Fetching on-chain balances…');
         const list = await ctx.accountsInfo();
-        const max = (ctx.maxSubWallets || 49) + 1;
+        const max = (ctx.maxSubWallets || 1000) + 1;
         const lines = list.map(a => {
           const live = a.running ? ` | ${a.connected ? '🟢' : '🔴'} L${fmt(a.level)} ${fmt(a.gold)}g` : '';
           return `${a.isMain ? '⭐' : '•'} <b>${esc(a.label)}</b> <code>${esc(a.address.slice(0, 4) + '…' + a.address.slice(-4))}</code> — ◎${(a.sol || 0).toFixed(3)} • 🌾${fmt(Math.floor(a.farm || 0))}${live}`;
@@ -206,9 +206,9 @@ export async function dispatchCommand(text, ctx, send) {
       case '/genwallets': {
         if (!ctx.genWallets) return send('🔑 Multi-account not available in this build.');
         const n = Number(args[0]);
-        if (!Number.isFinite(n) || n < 1) return send(`🔑 Usage: <code>/genwallets &lt;n&gt;</code> — create n sub-wallets (max ${ctx.maxSubWallets || 49} total subs).`);
+        if (!Number.isFinite(n) || n < 1) return send(`🔑 Usage: <code>/genwallets &lt;n&gt;</code> — create n sub-wallets (max ${ctx.maxSubWallets || 1000} total subs).`);
         const r = ctx.genWallets(n);
-        return send(`🔑 Generated <b>${r.added}</b> sub-wallet(s) (total ${r.total}/${ctx.maxSubWallets || 49}${r.room === 0 ? ', cap reached' : ''}).\nFund each with a little SOL for gas, then /accounts to view. Sub-wallets earn $FARM and you /sweep it to your main wallet.`);
+        return send(`🔑 Generated <b>${r.added}</b> sub-wallet(s) (total ${r.total}/${ctx.maxSubWallets || 1000}${r.room === 0 ? ', cap reached' : ''}).\nFund each with a little SOL for gas, then /accounts to view. Sub-wallets earn $FARM and you /sweep it to your main wallet.`);
       }
       case '/sweep': {
         if (!ctx.sweepAll) return send('🧹 Multi-account not available in this build.');

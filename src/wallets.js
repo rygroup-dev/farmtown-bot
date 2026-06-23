@@ -1,7 +1,7 @@
 // Multi-account wallet manager.
 //
-// Account #1 ("main") is always SOLANA_SECRET_KEY from .env. Up to 49 additional
-// "sub" wallets (50 total) are generated random keypairs, persisted to data/wallets.json
+// Account #1 ("main") is always SOLANA_SECRET_KEY from .env. Up to 1000 additional
+// "sub" wallets (1001 total) are generated random keypairs, persisted to data/wallets.json
 // (git-ignored, chmod 600). Every sub wallet farms its OWN profile under the SAME pasted
 // Supabase session, and periodically sweeps its earned $FARM to the main wallet — so you
 // only fund each sub wallet with a little SOL for gas.
@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import bs58 from 'bs58';
 import { Keypair } from '@solana/web3.js';
 
-export const MAX_SUB_WALLETS = 49; // + 1 main = 50 total
+export const MAX_SUB_WALLETS = 1000; // + 1 main = 1001 total
 const FILE = 'data/wallets.json';
 
 export function parseSecret(sk) {

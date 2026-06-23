@@ -140,7 +140,7 @@ export async function runAccount(account = {}) {
     walletInfo: () => getWalletInfo(),
     withdraw: () => withdrawFarm(config.withdrawAddress),
     withdrawAddress: config.withdrawAddress,
-    // --- multi-account (main + up to 49 sub wallets, one shared Supabase session) ---
+    // --- multi-account (main + up to 1000 sub wallets, one shared Supabase session) ---
     maxSubWallets: MAX_SUB_WALLETS,
     genWallets: (n) => generateSubWallets(n),
     // Verify the captcha key works by minting one throwaway session (no wallet bound).
@@ -442,23 +442,21 @@ export async function runAccount(account = {}) {
     }
   })();
 
-  // Auto-sweep: periodically move every sub wallet's earned $FARM to the MAIN wallet,
-  // so you only ever fund subs with a little SOL for gas and collect $FARM in one place.
-  // No-op (and silent) when there are no sub wallets or nothing to send.
-  (async function autoSweepLoop() {
-    if (!isMain) return; // only the main account runs the global sweep
-    while (flags.running) {
-      await sleep(gaussianDelay(5400000, 6600000)); // ~1.5–1.8h
-      try {
-        const roster = buildRoster(config.keypair).filter(a => !a.isMain);
-        if (!roster.length) continue;
-        const mainAddr = config.keypair.publicKey.toBase58();
-        let sent = 0, n = 0;
-        for (const a of roster) { const r = await withdrawFarm(mainAddr, a.keypair); if (r.ok) { sent += r.amount || 0; n++; } }
-        if (n > 0) tg.notify(`🧹 Auto-swept ${n} sub-wallet(s): ${Math.floor(sent)} $FARM → main wallet.`);
-      } catch (e) { log.warn('SWEEP', e.message); }
-    }
-  })();
+  // Auto-sweep DISABLED — $FARM stays in sub wallets until manual /sweep command.
+  // (async function autoSweepLoop() {
+  //   if (!isMain) return;
+  //   while (flags.running) {
+  //     await sleep(gaussianDelay(5400000, 6600000));
+  //     try {
+  //       const roster = buildRoster(config.keypair).filter(a => !a.isMain);
+  //       if (!roster.length) continue;
+  //       const mainAddr = config.keypair.publicKey.toBase58();
+  //       let sent = 0, n = 0;
+  //       for (const a of roster) { const r = await withdrawFarm(mainAddr, a.keypair); if (r.ok) { sent += r.amount || 0; n++; } }
+  //       if (n > 0) tg.notify(`🧹 Auto-swept ${n} sub-wallet(s): ${Math.floor(sent)} $FARM → main wallet.`);
+  //     } catch (e) { log.warn('SWEEP', e.message); }
+  //   }
+  // })();
 
   while (flags.running) {
     try {
