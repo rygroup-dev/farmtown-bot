@@ -74,12 +74,13 @@ export async function dispatchCommand(text, ctx, send) {
     switch (cmd) {
       case '/status': {
         const f = ctx.flags;
+        const fStars = s.claimableFallingStars?.() || [];
         return send(
           `📊 <b>Status</b>\n` +
           `${f.running ? '🟢 Running' : '🔴 Stopped'} | ${f.paused ? '⏸️ Paused' : '▶️ Active'} | Autopilot: ${f.autopilot ? 'ON' : 'OFF'} | Connected: ${f.connected ? '✅' : '❌'}\n` +
           `🎮 Level ${fmt(s.level)} • 💰 ${fmt(s.gold)} gold • ✨ ${fmt(s.xp)} XP • ⭐ ${fmt(s.stars)} stars\n` +
           `🎯 Objective: ${f.objective || 'balanced'}${f.forceCrop ? ` • forced: ${esc(f.forceCrop)}` : ''}\n` +
-          `🏡 Owned: ${s.ownedTiles().length} • Ready: ${s.readyToHarvest().length}\n` +
+          `🏡 Owned: ${s.ownedTiles().length} • Ready: ${s.readyToHarvest().length}${fStars.length ? ` • 🌟 Falling stars: ${fStars.length}` : ''}\n` +
           `📈 ${esc(ctx.stats())}`
         );
       }
@@ -158,7 +159,7 @@ export async function dispatchCommand(text, ctx, send) {
       case '/pool': {
         const p = await ctx.pool();
         if (!p) return send('🏊 <b>Farmer Pool</b>\nStatus unavailable (server slow / not logged in).');
-        const pool = p.pool || {}, player = p.player || {}, cfg = p.config || {};
+        const pool = p.pool || {}, player = p.player || {}, cfg = p.config || {}, eb = p.earlyBird || {};
         const sym = cfg.tokenSymbol || 'FARM';
         const px = Number(p.tokenUsdPrice || 0);
         const farmDay = Number(pool.totalTokensAllocatedRaw || 0) / 1e6;
@@ -170,18 +171,39 @@ export async function dispatchCommand(text, ctx, send) {
         const fpPower = Math.floor((player.availableFarmPoints || 0) / (cfg.farmPointsPerPower || 100));
         const lvlBurn = player.burnableLevels || 0;
         const minAfter = cfg.minLevelAfterBurn || 30;
-        const eligLine = !unlocked ? `🔒 needs L${cfg.minLevel || 30}` : !starGate ? `🔒 needs ${player.minStarsToEnter || 3}⭐ (buy via /wallet)` : '✅ eligible';
+        const eligLine = !unlocked ? `🔒 needs L${cfg.minLevel || 30}` : !starGate ? `🔒 needs ${player.minStarsToEnter || 3}⭐ (collect falling stars or /starmain)` : '✅ eligible';
+
+        const now = Date.now();
+        const opensAt = pool.opensAt ? Date.parse(pool.opensAt) : null;
+        const closesAt = pool.closesAt ? Date.parse(pool.closesAt) : null;
+        const ebEndsAt = eb.endsAt ? Date.parse(eb.endsAt) : null;
+        const hms = (ms) => { const h = Math.floor(ms/3600000); const m = Math.floor((ms%3600000)/60000); return `${h}h${m}m`; };
+        let timingLine = '';
+        if (opensAt && opensAt > now) timingLine = `⏱️ Opens in <b>${hms(opensAt - now)}</b> (${new Date(opensAt).toUTCString()})`;
+        else if (opensAt && closesAt && now < closesAt) {
+          timingLine = `⏱️ <b>OPEN</b> — closes in ${hms(closesAt - now)}`;
+          if (ebEndsAt && now < ebEndsAt) timingLine += ` • 🐦 Early bird +10% for ${hms(ebEndsAt - now)}`;
+        } else if (closesAt && now >= closesAt) timingLine = '⏱️ Pool closed';
+
+        const cropInv = s.cropInventory || {};
+        const sacLine = (cropInv.starfruit || 0) + (cropInv.crystal_berry || 0) > 0
+          ? `\n🌾 Sacrifice crops: starfruit ×${fmt(cropInv.starfruit || 0)} (2 pwr ea) • crystal berry ×${fmt(cropInv.crystal_berry || 0)} (1 pwr ea) <i>(REST not yet enabled)</i>`
+          : '';
+
         return send(
           `🏊 <b>Farmer Pool</b> ($${sym})\n` +
           `Status: <b>${esc(pool.status || 'unknown')}</b> • Enabled: ${cfg.enabled ? '✅' : '❌'} • Date: ${esc(pool.poolDate || 'n/a')}\n` +
-          `Pool/day: ${fmt(farmDay)} ${sym}${usd(farmDay)} • Farmers: ${fmt(pool.activeParticipantCount)}\n` +
+          (timingLine ? timingLine + '\n' : '') +
+          `Pool: ${fmt(farmDay)} ${sym}${usd(farmDay)} • Farmers: ${fmt(pool.activeParticipantCount)}\n` +
           `Price: $${px ? px.toFixed(6) : '?'} • Value/power: ${perPower.toFixed(2)} ${sym}${usd(perPower)}\n` +
           `\n<b>You</b> — L${fmt(player.level)} • ${eligLine}\n` +
           `Farm points: ${fmt(player.availableFarmPoints)} (= ${fpPower} power ready, free)\n` +
-          `Sacrifice: ${lvlBurn} levels burnable (floor L${minAfter}) • Stars: ${player.starsPurchasedThisEvent || 0}/${player.minStarsToEnter || 3}⭐\n` +
+          `Sacrifice: ${lvlBurn} levels burnable (floor L${minAfter}) • Stars: ${player.starsPurchasedThisEvent || 0}/${player.minStarsToEnter || 3}⭐` +
+          sacLine + '\n' +
           `Power today: ${fmt(player.contributedClaimPowerToday)} • Multiplier: ${player.powerMultiplier || 1}x\n` +
           `Est. payout: ${payout.toFixed(2)} ${sym}${usd(payout)} • FARM held: ${fmt(player.farmHeld || 0)} (need ${fmt(player.minFarmToHold || 0)})\n` +
-          `\n<i>Strategy: auto-burns farm points every ~10 min. Gold burn: /poolburn on. Level sacrifice: burn ${lvlBurn} levels (L${player.level}→L${minAfter}). Stars: buy via /wallet deposit.</i>`
+          `Hold gate: ${player.meetsHoldGate ? '✅' : '❌'} • Star gate: ${player.meetsStarGate ? '✅' : '❌'}\n` +
+          `\n<i>Strategy: auto-burns farm points every ~${eb.active ? '5' : '10'} min. Gold burn: /poolburn on. Level sacrifice: burn ${lvlBurn} levels (L${player.level}→L${minAfter}). Stars: collect falling stars (free!) or /starmain starter.</i>`
         );
       }
       case '/economy':

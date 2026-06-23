@@ -90,6 +90,45 @@ test('/pool reads real status fields (poolDate, totalTokensAllocatedRaw, unlocke
   assert.match(m, /2026-06-21/);
   assert.match(m, /4,400,000/);   // 4.4e12 / 1e6
   assert.match(m, /✅ eligible/);  // unlocked
+  assert.match(m, /Hold gate/);
+  assert.match(m, /Star gate/);
+});
+
+test('/pool shows countdown when opensAt is in the future', async () => {
+  const { ctx } = mockCtx();
+  const now = Date.now();
+  ctx.pool = async () => ({
+    config: { enabled: false, minLevel: 10, tokenSymbol: 'FARM' },
+    pool: { status: 'active', poolDate: '2026-06-24', totalTokensAllocatedRaw: '982203000000',
+            opensAt: new Date(now + 7200000).toISOString(), closesAt: new Date(now + 180000000).toISOString() },
+    player: { level: 35, gold: 5000, availableFarmPoints: 445, unlocked: true, meetsStarGate: false,
+              meetsHoldGate: true, starsPurchasedThisEvent: 0, minStarsToEnter: 3 },
+    earlyBird: { active: false, bonus: 0.1, endsAt: new Date(now + 28800000).toISOString() },
+  });
+  const { send, msgs } = recorder();
+  await dispatchCommand('/pool', ctx, send);
+  const m = msgs[0];
+  assert.match(m, /Opens in/);
+  assert.match(m, /needs 3⭐/);
+  assert.match(m, /falling stars/);
+});
+
+test('/pool shows OPEN + early bird when pool is active', async () => {
+  const { ctx } = mockCtx();
+  const now = Date.now();
+  ctx.pool = async () => ({
+    config: { enabled: true, minLevel: 10, tokenSymbol: 'FARM' },
+    pool: { status: 'active', poolDate: '2026-06-24', totalTokensAllocatedRaw: '4400000000000',
+            opensAt: new Date(now - 3600000).toISOString(), closesAt: new Date(now + 172800000).toISOString() },
+    player: { level: 35, gold: 5000, availableFarmPoints: 445, unlocked: true, meetsStarGate: true, meetsHoldGate: true },
+    earlyBird: { active: true, bonus: 0.1, endsAt: new Date(now + 18000000).toISOString() },
+  });
+  const { send, msgs } = recorder();
+  await dispatchCommand('/pool', ctx, send);
+  const m = msgs[0];
+  assert.match(m, /OPEN/);
+  assert.match(m, /Early bird/);
+  assert.match(m, /✅ eligible/);
 });
 
 test('/log HTML-escapes special chars (no broken markup)', async () => {
