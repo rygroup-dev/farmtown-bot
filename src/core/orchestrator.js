@@ -627,9 +627,13 @@ export async function runAccount(account = {}) {
         while (manualQueue.length) { const m = manualQueue.shift(); await handleManual(m, { state, runner, flags, gs, settings, reconnect: () => scheduleReconnect('manual') }); }
         const timeBudgetSeconds = secondsUntilInactive(settings.activeHours);
         const ecoForPlant = flags.forceCrop && eco[flags.forceCrop] ? { [flags.forceCrop]: eco[flags.forceCrop] } : eco;
+        // Below pool minLevel while pool is active → prioritize XP to reach eligibility faster.
+        const poolMinLevel = config.pool?.sacrificeAt || 30;
+        const autoXp = config.pool.enabled && state.level < poolMinLevel && !flags.forceCrop;
+        const effectiveObjective = autoXp ? 'xp' : flags.objective;
         const plan = [
           ...planClaims(state),
-          ...planActions(state, ecoForPlant, { objective: flags.objective, timeBudgetSeconds, goldReserve: settings.goldReserve, sacrificeRatio: config.pool.enabled ? 0.5 : 0 }),
+          ...planActions(state, ecoForPlant, { objective: effectiveObjective, timeBudgetSeconds, goldReserve: settings.goldReserve, sacrificeRatio: config.pool.enabled ? 0.5 : 0 }),
           ...planStorage(state),
         ];
         if (plan.length) {
