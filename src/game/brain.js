@@ -57,13 +57,16 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
 
     const plantedSeed = {}; // per-seed count queued THIS tick, for buy decisions
     let planted = 0;
+    let goldSpent = 0;
     for (const t of state.tilledEmpty()) {
       if (planted >= maxPlantsPerTick) break;
       const crop = queue[planted] || fillerFor(planted - queue.length);
       const sid = crop.seedId;
       const need = (plantedSeed[sid] || 0) + 1;
       if ((state.inventory[sid] || 0) < need) {
+        if (state.gold - goldSpent < (crop.cost || 0)) break;
         plan.push({ kind:'buySeed', event:'store:buySeed/request', payload:{ seedId: sid, quantity: 1 }, meta:null });
+        goldSpent += (crop.cost || 0);
       }
       plan.push({ kind:'plant', event:'crop:plant/request', payload:{ tileX:t.x, tileY:t.y, seedId: sid }, meta:{ action:'plant', tool:'seed_bag', seedId: sid } });
       plantedSeed[sid] = need;

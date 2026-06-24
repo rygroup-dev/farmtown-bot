@@ -521,7 +521,7 @@ export async function runAccount(account = {}) {
       const cropSac = decideCropSacrifice(state.cropInventory);
       if (cropSac) {
         const parts = Object.entries(cropSac.crops).map(([c, n]) => `${n} ${c}`).join(', ');
-        log.info('FARMPOOL', `${tag}crop sacrifice available: ${parts} = +${cropSac.totalPower} power (NOT sent yet — REST endpoint doesn't accept crops)`);
+        log.info('FARMPOOL', `${tag}crop sacrifice queued: ${parts} = +${cropSac.totalPower} power`);
       }
 
       const r = await maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level, cropInventory: state.cropInventory });

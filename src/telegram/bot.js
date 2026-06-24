@@ -190,20 +190,45 @@ export async function dispatchCommand(text, ctx, send) {
           ? `\n🌾 Sacrifice crops: starfruit ×${fmt(cropInv.starfruit || 0)} (2 pwr ea) • crystal berry ×${fmt(cropInv.crystal_berry || 0)} (1 pwr ea) <i>(REST not yet enabled)</i>`
           : '';
 
+        // Fleet-wide pool power: poll each running account's pool status
+        let fleetLine = '';
+        if (ctx.registry?.size > 1) {
+          let totalPower = player.contributedClaimPowerToday || 0;
+          let totalPayout = payout;
+          let totalFp = player.availableFarmPoints || 0;
+          const accLines = [`  ⭐ <b>main</b>: ⚡${fmt(player.contributedClaimPowerToday || 0)} power • 💰${payout.toFixed(2)} ${sym}`];
+          const { pollFarmerPool: pollSub } = await import('../game/farmerpool.js');
+          for (const [lbl, eng] of ctx.registry) {
+            if (eng.isMain) continue;
+            try {
+              const sp = await pollSub(eng.rest);
+              const sp2 = sp?.player || {};
+              const subPow = sp2.contributedClaimPowerToday || 0;
+              const subPay = Number(sp2.estimatedPayoutRaw || 0) / 1e6;
+              totalPower += subPow; totalPayout += subPay; totalFp += (sp2.availableFarmPoints || 0);
+              accLines.push(`  • <b>${esc(lbl)}</b>: ⚡${fmt(subPow)} power • 💰${subPay.toFixed(2)} ${sym}${sp2.meetsStarGate === false ? ' 🔒star' : ''}`);
+            } catch {}
+          }
+          fleetLine = `\n\n🏭 <b>Fleet Power</b> (${ctx.registry.size} accounts)\n` +
+            accLines.join('\n') +
+            `\n\n📊 <b>Fleet Total</b>: ⚡${fmt(totalPower)} power • 💰${totalPayout.toFixed(2)} ${sym}${usd(totalPayout)} • FP: ${fmt(totalFp)}`;
+        }
+
         return send(
           `🏊 <b>Farmer Pool</b> ($${sym})\n` +
           `Status: <b>${esc(pool.status || 'unknown')}</b> • Enabled: ${cfg.enabled ? '✅' : '❌'} • Date: ${esc(pool.poolDate || 'n/a')}\n` +
           (timingLine ? timingLine + '\n' : '') +
           `Pool: ${fmt(farmDay)} ${sym}${usd(farmDay)} • Farmers: ${fmt(pool.activeParticipantCount)}\n` +
           `Price: $${px ? px.toFixed(6) : '?'} • Value/power: ${perPower.toFixed(2)} ${sym}${usd(perPower)}\n` +
-          `\n<b>You</b> — L${fmt(player.level)} • ${eligLine}\n` +
+          `\n<b>You (main)</b> — L${fmt(player.level)} • ${eligLine}\n` +
           `Farm points: ${fmt(player.availableFarmPoints)} (= ${fpPower} power ready, free)\n` +
           `Sacrifice: ${lvlBurn} levels burnable (floor L${minAfter}) • Stars: ${player.starsPurchasedThisEvent || 0}/${player.minStarsToEnter || 3}⭐` +
           sacLine + '\n' +
           `Power today: ${fmt(player.contributedClaimPowerToday)} • Multiplier: ${player.powerMultiplier || 1}x\n` +
           `Est. payout: ${payout.toFixed(2)} ${sym}${usd(payout)} • FARM held: ${fmt(player.farmHeld || 0)} (need ${fmt(player.minFarmToHold || 0)})\n` +
-          `Hold gate: ${player.meetsHoldGate ? '✅' : '❌'} • Star gate: ${player.meetsStarGate ? '✅' : '❌'}\n` +
-          `\n<i>Strategy: auto-burns farm points every ~${eb.active ? '5' : '10'} min. Gold burn: /poolburn on. Level sacrifice: burn ${lvlBurn} levels (L${player.level}→L${minAfter}). Stars: collect falling stars (free!) or /starmain starter.</i>`
+          `Hold gate: ${player.meetsHoldGate ? '✅' : '❌'} • Star gate: ${player.meetsStarGate ? '✅' : '❌'}` +
+          fleetLine +
+          `\n\n<i>Strategy: auto-burns farm points every ~${eb.active ? '5' : '10'} min. Gold burn: /poolburn on. Level sacrifice: burn ${lvlBurn} levels (L${player.level}→L${minAfter}). Stars: collect falling stars (free!) or /starmain starter.</i>`
         );
       }
       case '/economy':
@@ -218,41 +243,75 @@ export async function dispatchCommand(text, ctx, send) {
 
       case '/accounts': {
         if (!ctx.accountsInfo) return send('👥 Multi-account not available in this build.');
-        await send('👥 Fetching on-chain balances…');
+        await send('👥 Fetching on-chain balances + pool power…');
         const list = await ctx.accountsInfo();
         const max = (ctx.maxSubWallets || 1000) + 1;
-        const lines = list.map(a => {
+        const { pollFarmerPool: pollAcc } = await import('../game/farmerpool.js');
+        let totPower = 0, totPayout = 0;
+        const lines = [];
+        for (const a of list) {
           const live = a.running ? ` | ${a.connected ? '🟢' : '🔴'} L${fmt(a.level)} ${fmt(a.gold)}g` : '';
-          return `${a.isMain ? '⭐' : '•'} <b>${esc(a.label)}</b> <code>${esc(a.address.slice(0, 4) + '…' + a.address.slice(-4))}</code> — ◎${(a.sol || 0).toFixed(3)} • 🌾${fmt(Math.floor(a.farm || 0))}${live}`;
-        });
-        const totFarm = list.reduce((s, a) => s + (a.farm || 0), 0);
-        const totSol = list.reduce((s, a) => s + (a.sol || 0), 0);
-        return send(`👥 <b>Accounts ${list.length}/${max}</b>\n${lines.join('\n')}\n\nTotal: ◎${totSol.toFixed(3)} SOL • 🌾${fmt(Math.floor(totFarm))} $FARM`);
+          let poolStr = '';
+          if (a.running && ctx.registry) {
+            const eng = ctx.registry.get(a.label);
+            if (eng?.rest) {
+              try {
+                const sp = await pollAcc(eng.rest);
+                const sp2 = sp?.player || {};
+                const pow = sp2.contributedClaimPowerToday || 0;
+                const pay = Number(sp2.estimatedPayoutRaw || 0) / 1e6;
+                totPower += pow; totPayout += pay;
+                poolStr = ` • ⚡${fmt(pow)}`;
+              } catch {}
+            }
+          }
+          lines.push(`${a.isMain ? '⭐' : '•'} <b>${esc(a.label)}</b> <code>${esc(a.address.slice(0, 4) + '…' + a.address.slice(-4))}</code> — ◎${(a.sol || 0).toFixed(3)} • 🌾${fmt(Math.floor(a.farm || 0))}${poolStr}${live}`);
+        }
+        const totFarm = list.reduce((s2, a) => s2 + (a.farm || 0), 0);
+        const totSol = list.reduce((s2, a) => s2 + (a.sol || 0), 0);
+        return send(
+          `👥 <b>Accounts ${list.length}/${max}</b>\n${lines.join('\n')}\n\n` +
+          `Total: ◎${totSol.toFixed(3)} SOL • 🌾${fmt(Math.floor(totFarm))} $FARM\n` +
+          `⚡ <b>Fleet Pool</b>: ${fmt(totPower)} power • 💰${totPayout.toFixed(2)} FARM payout`
+        );
       }
       case '/subacc': {
         if (!ctx.registry) return send('👥 Multi-account not available.');
         const subs = [...ctx.registry.values()].filter(e => !e.isMain);
         if (!subs.length) return send('👥 No sub accounts running.');
         await send('👥 Fetching sub account details…');
+        const { pollFarmerPool: pollSub } = await import('../game/farmerpool.js');
         const lines = [];
-        let totOwned = 0, totStars = 0, totFarm = 0, totGold = 0;
+        let totOwned = 0, totStars = 0, totFarm = 0, totGold = 0, totPower = 0, totPayout = 0;
         for (const e of subs) {
-          const s = e.state;
-          const owned = s?.ownedTiles?.()?.length ?? 0;
-          const ready = s?.readyToHarvest?.()?.length ?? 0;
-          const fStars = s?.claimableFallingStars?.()?.length ?? 0;
+          const st = e.state;
+          const owned = st?.ownedTiles?.()?.length ?? 0;
+          const ready = st?.readyToHarvest?.()?.length ?? 0;
+          const fStars = st?.claimableFallingStars?.()?.length ?? 0;
           let farmBal = 0;
           try { const info = await (await import('../game/wallet_info.js')).getWalletInfo(e.keypair); farmBal = info.farm || 0; } catch {}
-          totOwned += owned; totStars += (s?.stars ?? 0); totFarm += farmBal; totGold += (s?.gold ?? 0);
+          let poolPow = 0, poolPay = 0, poolGate = '';
+          try {
+            const sp = await pollSub(e.rest);
+            const sp2 = sp?.player || {};
+            poolPow = sp2.contributedClaimPowerToday || 0;
+            poolPay = Number(sp2.estimatedPayoutRaw || 0) / 1e6;
+            if (sp2.meetsStarGate === false) poolGate = ' 🔒star';
+            else if (sp2.meetsHoldGate === false) poolGate = ' 🔒hold';
+          } catch {}
+          totOwned += owned; totStars += (st?.stars ?? 0); totFarm += farmBal; totGold += (st?.gold ?? 0);
+          totPower += poolPow; totPayout += poolPay;
           lines.push(
             `• <b>${esc(e.label)}</b> ${e.flags?.connected ? '🟢' : '🔴'} <code>${esc(e.addr?.slice(0, 4) + '…' + e.addr?.slice(-4))}</code>\n` +
-            `  L${fmt(s?.level)} • 💰${fmt(s?.gold)}g • ⭐${fmt(s?.stars)} stars • 🌾${fmt(Math.floor(farmBal))} $FARM\n` +
-            `  🏡 Plots: ${owned} • ✅ Ready: ${ready}${fStars ? ` • 🌟 Stars: ${fStars}` : ''}`
+            `  L${fmt(st?.level)} • 💰${fmt(st?.gold)}g • ⭐${fmt(st?.stars)} stars • 🌾${fmt(Math.floor(farmBal))} $FARM\n` +
+            `  🏡 Plots: ${owned} • ✅ Ready: ${ready}${fStars ? ` • 🌟 Stars: ${fStars}` : ''}\n` +
+            `  ⚡ Pool power: ${fmt(poolPow)} • 💰 Payout: ${poolPay.toFixed(2)} FARM${poolGate}`
           );
         }
         return send(
           `👥 <b>Sub Accounts (${subs.length})</b>\n${lines.join('\n')}\n\n` +
-          `📊 Total: ${totOwned} plots • ${totStars}⭐ stars • 💰${fmt(totGold)}g • 🌾${fmt(Math.floor(totFarm))} $FARM`
+          `📊 <b>Sub Total</b>: ${totOwned} plots • ${totStars}⭐ • 💰${fmt(totGold)}g • 🌾${fmt(Math.floor(totFarm))} $FARM\n` +
+          `⚡ <b>Sub Pool Total</b>: ${fmt(totPower)} power • 💰${totPayout.toFixed(2)} FARM payout`
         );
       }
       case '/mintsession': {

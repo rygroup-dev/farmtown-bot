@@ -6,8 +6,8 @@
 //     earlyBird:{active,bonus,endsAt} }
 // POST /api/rewards/farmer-pool/claim
 //   body { actionId, goldToBurn, farmPointsToBurn, levelsToBurn }
-// Crop sacrifice (starfruit=2 power, crystal_berry=1 power) is UI-only for now —
-// the REST endpoint doesn't accept cropSacrifices yet. When it does, we're ready.
+// Crop sacrifice (starfruit=2 power, crystal_berry=1 power) — included in claim body.
+// Server may ignore if not yet supported; we send it unconditionally.
 import { log } from '../logger.js';
 
 export const SACRIFICE_CROPS = { starfruit: 2, crystal_berry: 1 };
@@ -67,8 +67,11 @@ export function decideContribution(status, { burnGold = false, goldReserve = 100
     }
   }
 
-  if (farmPointsToBurn + goldToBurn + levelsToBurn <= 0) return null;
-  return { farmPointsToBurn, goldToBurn, levelsToBurn };
+  const cropSac = cropInventory ? decideCropSacrifice(cropInventory) : null;
+  const cropSacrifices = cropSac ? cropSac.crops : null;
+
+  if (farmPointsToBurn + goldToBurn + levelsToBurn <= 0 && !cropSacrifices) return null;
+  return { farmPointsToBurn, goldToBurn, levelsToBurn, ...(cropSacrifices ? { cropSacrifices } : {}) };
 }
 
 // Compute how many sacrifice crops the bot should burn for extra pool power.
@@ -105,7 +108,8 @@ export async function maybeContribute(rest, opts = {}) {
     const r = await claimFarmerPool(rest, c);
     const ok = r.status === 200 && r.json?.ok !== false;
     const earlyTag = timing?.isEarlyBird ? ' [EARLY BIRD +10%]' : '';
-    log.info('FARMPOOL', `claim gold=${c.goldToBurn} points=${c.farmPointsToBurn} levels=${c.levelsToBurn}${earlyTag} -> ${ok ? 'OK' : 'FAIL ' + r.status}`);
+    const cropTag = c.cropSacrifices ? ` crops=${JSON.stringify(c.cropSacrifices)}` : '';
+    log.info('FARMPOOL', `claim gold=${c.goldToBurn} points=${c.farmPointsToBurn} levels=${c.levelsToBurn}${cropTag}${earlyTag} -> ${ok ? 'OK' : 'FAIL ' + r.status}`);
     return { ok, contributed: ok, result: r.json, timing };
   } catch (e) {
     log.warn('FARMPOOL', e.message);
