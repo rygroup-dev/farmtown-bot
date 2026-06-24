@@ -53,6 +53,7 @@ export function decideContribution(status, { burnGold = false, goldReserve = 100
   const eligible = player?.unlocked === true || (player?.level || 0) >= (cfg.minLevel || 30);
   if (!eligible) return null;
   if (player?.meetsStarGate === false) return null;
+  if (player?.meetsHoldGate === false) return null;
 
   const fpPer = cfg.farmPointsPerPower || 100;
   const goldPer = cfg.goldPerPower || 250000;
@@ -105,6 +106,10 @@ export async function maybeContribute(rest, opts = {}) {
     if (!status) return { ok: false, reason: 'status-unavailable' };
 
     const timing = poolTiming(status);
+    const player = status?.player;
+    // Log gate failures so they're visible in the log
+    if (player?.meetsHoldGate === false) log.warn('FARMPOOL', `${tag}hold gate not met — need ${player.minFarmToHold || 2500} FARM, have ${player.farmHeld || 0}`);
+    if (player?.meetsStarGate === false) log.warn('FARMPOOL', `${tag}star gate not met — need ${player.minStarsToEnter || 3}⭐, have ${player.starsPurchasedThisEvent || 0}`);
     const c = decideContribution(status, opts);
     if (!c) return { ok: true, contributed: false, pool: status.pool?.status, level: status.player?.level, timing };
 
