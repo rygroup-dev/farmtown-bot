@@ -18,6 +18,80 @@ import { buildRoster, generateSubWallets, parseSecret, loadSubWallets, MAX_SUB_W
 import { withinActiveHours, secondsUntilInactive, sleep, gaussianDelay, maybeBreak } from '../safety/humanizer.js';
 import { startTelegram } from '../telegram/bot.js';
 
+// === TOP-LEVEL HELPERS (extracted from runAccount closures for testability + reuse) ===
+
+// Proactively renew the walletSessionToken BEFORE it expires, so reconnects don't
+// hit the slow /api/auth/wallet/verify on every reconnect — we only re-bind when
+// the token is within `expiringSoonFn`'s window. Best-effort: bind errors are logged
+// and swallowed (the reconnect path will pick up a true re-bind if needed).
+export async function proactiveWalletRefresh({
+  session, rest, keypair, sessionStore, tag,
+  bindWalletFn = bindWallet,
+  expiringSoonFn = walletSessionExpiringSoon,
+  log,
+}) {
+  if (!expiringSoonFn(session, 5 * 60_000)) return { renewed: false };
+  try {
+    const v = await bindWalletFn(rest, keypair);
+    session.walletSessionToken = v.walletSessionToken;
+    sessionStore.save(session);
+    log.info('AUTH', `${tag}proactively renewed walletSessionToken`);
+    return { renewed: true };
+  } catch (e) {
+    log.warn('KEEPALIVE', `${tag}wallet renew failed: ${e.message}`);
+    return { renewed: false, error: e.message };
+  }
+}
+
+// Refresh the Supabase access token. If refresh fails AND captcha is enabled,
+// mint a fresh session (player identity survives via re-bind). If refresh fails
+// AND captcha is disabled: main accounts THROW (caller must handle / re-paste
+// via /auth), sub accounts return 'retry' so ensureSupabaseFreshWithRetry can
+// loop without throwing back into the engine loop. Returns true on mint (caller
+// must re-bind wallet since gameplayAllowed=false on a fresh session).
+export async function ensureSupabaseFresh({
+  session, rest, sessionStore, tag, isMain = false, force = false,
+  supabaseExpiringSoonFn = supabaseExpiringSoon,
+  refreshSupabaseFn = refreshSupabase,
+  captchaEnabledFn = captchaEnabled,
+  mintSessionFn = mintSession,
+  log,
+}) {
+  if (!force && !supabaseExpiringSoonFn(session)) return false;
+  if (await refreshSupabaseFn(session, rest)) return false;
+  if (captchaEnabledFn()) {
+    log.warn('AUTH', tag + 'supabase refresh failed → minting fresh session via captcha');
+    const fresh = await mintSessionFn(rest);
+    session.access_token = fresh.access_token;
+    session.refresh_token = fresh.refresh_token;
+    session.obtainedAt = fresh.obtainedAt;
+    sessionStore.save(session);
+    return true;
+  }
+  if (isMain) throw new Error('invalid_grant: supabase refresh failed and no captcha key to re-mint — paste a fresh session via /auth');
+  return 'retry';
+}
+
+// Retry wrapper: keep calling ensureSupabaseFresh (with force=true) until it
+// returns something other than 'retry', or attempts are exhausted. Each retry
+// sleeps 30s. Used by boot + reauth() so a transient captcha/refresh hiccup
+// doesn't crash the engine — a sub-account can fail-and-retry silently, while
+// a main-account failure throws (propagates to the caller's try/catch).
+export async function ensureSupabaseFreshWithRetry({
+  maxAttempts = 3,
+  sleepFn = (ms) => new Promise(r => setTimeout(r, ms)),
+  ...deps
+} = {}) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const r = await ensureSupabaseFresh({ ...deps, force: true });
+    if (r !== 'retry') return r;
+    deps.log.warn('AUTH', `${deps.tag}supabase refresh failed (attempt ${i+1}/${maxAttempts}), retrying in 30s`);
+    await sleepFn(30000);
+  }
+  deps.log.error('AUTH', `${deps.tag}supabase refresh exhausted ${maxAttempts} attempts`);
+  return 'retry';
+}
+
 export async function runAccount(account = {}) {
   const {
     keypair = config.keypair,
@@ -64,33 +138,11 @@ export async function runAccount(account = {}) {
     }
   }
 
-  // Keep the Supabase access token usable. Refresh when near expiry; if the refresh fails
-  // (refresh_token rotated/dead — typically after a restart), MINT a fresh anonymous session
-  // via captcha. The player identity is tied to the WALLET, not the session, so a fresh
-  // session + re-bind of the same wallet restores the same farm. Returns true if it minted
-  // (caller must then re-bind the wallet, since a fresh session has gameplayAllowed=false
-  // until /wallet/verify authorizes this wallet on it). Without a captcha key, a forced
-  // failure surfaces so the user can re-paste a session via /auth.
-  async function ensureSupabaseFresh(force = false) {
-    if (!force && !supabaseExpiringSoon(session)) return false;
-    if (await refreshSupabase(session, rest)) return false;
-    if (captchaEnabled()) {
-      log.warn('AUTH', tag + 'supabase refresh failed → minting fresh session via captcha');
-      const fresh = await mintSession(rest);
-      session.access_token = fresh.access_token;
-      session.refresh_token = fresh.refresh_token;
-      session.obtainedAt = fresh.obtainedAt;
-      sessionStore.save(session);
-      return true;
-    }
-    if (force) throw new Error('invalid_grant: supabase refresh failed and no captcha key to re-mint — paste a fresh session via /auth');
-    return false;
-  }
 
   // Initial auth, retried — the server is sometimes in maintenance / flaky on boot
   // and bind can 401/time-out. Retry with backoff instead of crashing the process.
   async function authenticate() {
-    const reminted = await ensureSupabaseFresh();
+    const reminted = await ensureSupabaseFreshWithRetry({ session, rest, sessionStore, tag, isMain, log });
     if (session.cookieHeader) rest.setCookie(session.cookieHeader);
     rest.setBearer(session.access_token);
     let v;
@@ -271,7 +323,9 @@ export async function runAccount(account = {}) {
   // (much more resilient when the server is degraded, and less auth churn = anti-ban).
   async function reauth() {
     // Server-rejected token (forceSupabaseRemint) OR near-expiry → refresh, mint on failure.
-    const reminted = await ensureSupabaseFresh(forceSupabaseRemint);
+    // Use the top-level retry wrapper so a transient captcha/refresh hiccup doesn't crash
+    // the reconnect path (sub accounts retry silently; main failures still throw).
+    const reminted = await ensureSupabaseFreshWithRetry({ session, rest, sessionStore, tag, isMain, log });
     forceSupabaseRemint = false;
     rest.setBearer(session.access_token);
     // The WS gateway's explicit "Wallet verification required" rejection OVERRIDES the
@@ -473,6 +527,10 @@ export async function runAccount(account = {}) {
           // token makes supabaseExpiringSoon() false so this branch goes quiet).
           if (!okR && !reconnecting) scheduleReconnect('invalid_grant: supabase refresh failed');
         }
+        // Proactively re-bind the walletSessionToken BEFORE it expires — avoids hitting
+        // the slow /api/auth/wallet/verify on every reconnect (each bind is multi-RTT).
+        // Best-effort; the reconnect path will pick up the slack if a true re-bind is needed.
+        await proactiveWalletRefresh({ session, rest, keypair, sessionStore, tag, log });
         await keepWalletSessionAlive(rest);
       } catch (e) { log.warn('KEEPALIVE', e.message); }
       await sleep(60000);
@@ -536,7 +594,12 @@ export async function runAccount(account = {}) {
         poolNotified = false; poolOpenNotified = false; earlyBirdNotified = false;
       }
 
-      const loopDelay = r?.timing?.isEarlyBird ? gaussianDelay(120000, 180000) : gaussianDelay(240000, 360000);
+      // 409 = server rate-limit on claims — back off 15-20 min before retrying.
+      const rateLimited = r?.claimStatus === 409;
+      const loopDelay = rateLimited
+        ? gaussianDelay(900000, 1200000)
+        : r?.timing?.isEarlyBird ? gaussianDelay(120000, 180000) : gaussianDelay(240000, 360000);
+      if (rateLimited) log.info('FARMPOOL', `${tag}rate-limited (409) — backing off ${Math.round(loopDelay / 60000)}min`);
       await sleep(loopDelay);
     }
   })();

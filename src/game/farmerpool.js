@@ -113,7 +113,7 @@ export async function maybeContribute(rest, opts = {}) {
     const earlyTag = timing?.isEarlyBird ? ' [EARLY BIRD +10%]' : '';
     const cropTag = c.cropSacrifices ? ` crops=${JSON.stringify(c.cropSacrifices)}` : '';
     log.info('FARMPOOL', `${tag}claim gold=${c.goldToBurn} points=${c.farmPointsToBurn} levels=${c.levelsToBurn}${cropTag}${earlyTag} -> ${ok ? 'OK' : 'FAIL ' + r.status}`);
-    return { ok, contributed: ok, result: r.json, timing };
+    return { ok, contributed: ok, claimStatus: r.status, result: r.json, timing };
   } catch (e) {
     log.warn('FARMPOOL', `${tag}${e.message}`);
     return { ok: false, reason: e.message };
