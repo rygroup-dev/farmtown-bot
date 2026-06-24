@@ -42,7 +42,9 @@ export function poolTiming(status) {
 // Pure decision — the bot's pool strategy, encoded.
 export function decideContribution(status, { burnGold = false, goldReserve = 100000, burnLevels = false, levelFloor = 10, sacrificeAt = 0, currentLevel = null, cropInventory = null } = {}) {
   const cfg = status?.config, pool = status?.pool, player = status?.player;
-  if (!cfg?.enabled) return null;
+  if (!cfg) return null;
+  // Server may set config.enabled=false while pool.status is 'active' with valid opensAt/closesAt.
+  // Trust pool.status + timing over the config flag.
   if (!pool || pool.status !== 'active') return null;
 
   const timing = poolTiming(status);

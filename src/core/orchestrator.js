@@ -518,14 +518,13 @@ export async function runAccount(account = {}) {
         }
       } catch {}
 
-      const cropSac = decideCropSacrifice(state.cropInventory);
-      if (cropSac) {
-        const parts = Object.entries(cropSac.crops).map(([c, n]) => `${n} ${c}`).join(', ');
-        log.info('FARMPOOL', `${tag}crop sacrifice queued: ${parts} = +${cropSac.totalPower} power`);
-      }
-
       const r = await maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level, cropInventory: state.cropInventory });
       if (r?.contributed) {
+        const cropSac = decideCropSacrifice(state.cropInventory);
+        if (cropSac) {
+          const parts = Object.entries(cropSac.crops).map(([c, n]) => `${n} ${c}`).join(', ');
+          log.info('FARMPOOL', `${tag}crop sacrifice sent: ${parts} = +${cropSac.totalPower} power`);
+        }
         const now = Date.now();
         const earlyTag = r.timing?.isEarlyBird ? ' [EARLY BIRD]' : '';
         if (!poolNotified) { poolNotified = true; poolLastSummary = now; tg.notify(`${tag}💎 Farmer's Pool is open${earlyTag} — auto-contributing to earn $FARM. /pool for details.`); }
