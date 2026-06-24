@@ -136,7 +136,7 @@ export async function runAccount(account = {}) {
     },
     tailLog: (n = 20) => { try { return fs.readFileSync('data/bot.log', 'utf8').trim().split('\n').slice(-n).join('\n'); } catch { return '(no log yet)'; } },
     pool: () => pollFarmerPool(rest),
-    claimPool: () => maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level }),
+    claimPool: () => maybeContribute(rest, { tag, burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level }),
     walletInfo: () => getWalletInfo(),
     withdraw: () => withdrawFarm(config.withdrawAddress),
     withdrawAddress: config.withdrawAddress,
@@ -241,7 +241,7 @@ export async function runAccount(account = {}) {
       session.access_token = p.access_token;
       if (p.refresh_token) session.refresh_token = p.refresh_token;
       session.obtainedAt = Date.now();
-      saveSession(session);
+      sessionStore.save(session);
       authFailStreak = 0; degraded = false;
       flags.running = true;
       reconnecting = false; reconnectAttempt = 0;
@@ -518,7 +518,7 @@ export async function runAccount(account = {}) {
         }
       } catch {}
 
-      const r = await maybeContribute(rest, { burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level, cropInventory: state.cropInventory });
+      const r = await maybeContribute(rest, { tag, burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level, cropInventory: state.cropInventory });
       if (r?.contributed) {
         const cropSac = decideCropSacrifice(state.cropInventory);
         if (cropSac) {

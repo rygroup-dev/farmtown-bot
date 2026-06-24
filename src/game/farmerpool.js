@@ -17,7 +17,7 @@ function poolActionId() {
 }
 
 export async function pollFarmerPool(rest) {
-  const r = await rest.req('/api/rewards/farmer-pool/status');
+  const r = await rest.req('/api/rewards/farmer-pool/status', { timeoutMs: 60000, retries: 4 });
   return r.status === 200 ? r.json : null;
 }
 
@@ -94,11 +94,12 @@ export function decideCropSacrifice(cropInventory = {}, { reservePerCrop = 5 } =
 
 export async function claimFarmerPool(rest, contribution) {
   const body = { actionId: poolActionId(), ...contribution };
-  return rest.req('/api/rewards/farmer-pool/claim', { method: 'POST', body });
+  return rest.req('/api/rewards/farmer-pool/claim', { method: 'POST', body, timeoutMs: 60000 });
 }
 
 // Orchestrator entrypoint: poll → decide → claim. Returns a summary (never throws).
 export async function maybeContribute(rest, opts = {}) {
+  const tag = opts.tag || '';
   try {
     const status = await pollFarmerPool(rest);
     if (!status) return { ok: false, reason: 'status-unavailable' };
@@ -111,10 +112,10 @@ export async function maybeContribute(rest, opts = {}) {
     const ok = r.status === 200 && r.json?.ok !== false;
     const earlyTag = timing?.isEarlyBird ? ' [EARLY BIRD +10%]' : '';
     const cropTag = c.cropSacrifices ? ` crops=${JSON.stringify(c.cropSacrifices)}` : '';
-    log.info('FARMPOOL', `claim gold=${c.goldToBurn} points=${c.farmPointsToBurn} levels=${c.levelsToBurn}${cropTag}${earlyTag} -> ${ok ? 'OK' : 'FAIL ' + r.status}`);
+    log.info('FARMPOOL', `${tag}claim gold=${c.goldToBurn} points=${c.farmPointsToBurn} levels=${c.levelsToBurn}${cropTag}${earlyTag} -> ${ok ? 'OK' : 'FAIL ' + r.status}`);
     return { ok, contributed: ok, result: r.json, timing };
   } catch (e) {
-    log.warn('FARMPOOL', e.message);
+    log.warn('FARMPOOL', `${tag}${e.message}`);
     return { ok: false, reason: e.message };
   }
 }
