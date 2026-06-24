@@ -592,6 +592,8 @@ export async function runAccount(account = {}) {
         }
       } else if (r?.pool && r.pool !== 'active') {
         poolNotified = false; poolOpenNotified = false; earlyBirdNotified = false;
+      } else if (!r?.ok && r?.reason === 'status-unavailable') {
+        log.warn('FARMPOOL', `${tag}pool status unreachable — server may still be degraded, retrying in 2-5min`);
       }
 
       // 409 = server rate-limit on claims — back off 15-20 min before retrying.
