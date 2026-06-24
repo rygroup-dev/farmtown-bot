@@ -536,7 +536,7 @@ export async function runAccount(account = {}) {
         poolNotified = false; poolOpenNotified = false; earlyBirdNotified = false;
       }
 
-      const loopDelay = r?.timing?.isEarlyBird ? gaussianDelay(240000, 360000) : gaussianDelay(540000, 660000);
+      const loopDelay = r?.timing?.isEarlyBird ? gaussianDelay(120000, 180000) : gaussianDelay(240000, 360000);
       await sleep(loopDelay);
     }
   })();
