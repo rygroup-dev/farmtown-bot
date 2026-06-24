@@ -598,7 +598,7 @@ export async function runAccount(account = {}) {
       const rateLimited = r?.claimStatus === 409;
       const loopDelay = rateLimited
         ? gaussianDelay(900000, 1200000)
-        : r?.timing?.isEarlyBird ? gaussianDelay(120000, 180000) : gaussianDelay(240000, 360000);
+        : gaussianDelay(120000, 300000); // 2-5 min regardless of early bird
       if (rateLimited) log.info('FARMPOOL', `${tag}rate-limited (409) — backing off ${Math.round(loopDelay / 60000)}min`);
       await sleep(loopDelay);
     }
