@@ -14,8 +14,9 @@ actions, auto-reconnect, self-refreshing sessions, and a degraded-server/mainten
 - 🌟 **Falling star auto-collector** — detects server-spawned stars on your farm and
   auto-claims them before they expire. **Free stars from gameplay** — no purchase needed.
 - 💎 **Farmer's Pool ($FARM)** — pool-timing-aware (countdown, early bird +10% bonus),
-  auto-contributes free farm-points repeatedly; optional surplus-gold and **level-sacrifice**
-  strategies (with hard guardrails). Crop sacrifice tracking ready for when the server enables it.
+  auto-contributes free farm-points repeatedly; optional surplus-gold, **level-sacrifice**,
+  and **crop sacrifice** (starfruit + crystal berry) strategies (with hard guardrails).
+  Fleet-wide pool power visible via `/pool`, `/subacc`, `/accounts`.
 - 👥 **Multi-account** — 1 main + up to 1000 auto-generated sub-wallets, each its own
   farm/session, with **captcha auto-login** (no per-account browser paste) and
   auto-sweep of all $FARM to your main wallet. Controlled via `MULTI_ACCOUNT_LIMIT` in `.env`.
@@ -160,12 +161,14 @@ The bot auto-earns **$FARM tokens** from the Farmer's Pool. Requirements to ente
 
 **Pool contribution** runs every ~10 min (5 min during early bird +10% bonus window):
 - Always burns free **farm points** (zero cost)
+- Auto-sacrifices **starfruit** (2 power each) + **crystal berry** (1 power each) from harvest basket
 - Optionally burns surplus **gold** (`/poolburn on`)
 - Optionally **sacrifices levels** for 3× power each (advanced, opt-in via `.env`)
 
 The bot tracks pool timing (`opensAt`, `closesAt`, early bird window) and auto-contributes
-the moment the pool opens. `/pool` shows full status including countdown, gates, and
-estimated payout.
+the moment the pool opens — repeatedly, every ~10 min throughout the full window (e.g. 48h).
+`/pool` shows full status including countdown, gates, estimated payout, and **fleet-wide
+power breakdown** across all accounts.
 
 **$FARM uses Token-2022** (`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`), not the legacy
 SPL Token program — all on-chain operations handle this automatically.
