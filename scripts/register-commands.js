@@ -11,9 +11,11 @@ console.log('Registered', COMMAND_MENU.length, 'commands to the Telegram "/" men
 if (config.telegram.chatId) {
   const grouped =
     '🤖 <b>FarmTown Sentinel — Command Menu Registered</b>\n\n' +
-    '<b>INFO</b> /status /balance /farm /inventory /basket /orders /jobs /quests /mastery /stats /pool /economy /wallet\n\n' +
+    '<b>INFO</b> /status /balance /farm /inventory /basket /orders /jobs /quests /mastery /stats /pool /leaderboard /economy /wallet\n\n' +
+    '<b>MULTI-ACCOUNT</b> /accounts /subacc /genwallets /mintsession /sweep\n' +
+    '<b>STARS &amp; FUND</b> /starmain /starsub /sendfarm /sendfee /retrystar\n\n' +
     '<b>CONTROL</b> /start /stop /pause /resume /autopilot /objective /setcrop /reserve /sethours /poolburn\n\n' +
-    '<b>ACTIONS</b> /harvest /plant /plantall /buyplot /buyseed /upgradestorage /claimpool /reconnect /restart\n\n' +
+    '<b>ACTIONS</b> /harvest /plant /plantall /buyplot /buyseed /upgradestorage /claimpool /auth /reconnect /restart\n\n' +
     '<b>DIAG</b> /log /ping /help\n\n' +
     'Tip: type "/" in chat to see the autocomplete menu.';
   await bot.sendMessage(config.telegram.chatId, grouped, { parse_mode: 'HTML' });

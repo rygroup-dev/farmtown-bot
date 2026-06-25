@@ -188,6 +188,14 @@ export async function runAccount(account = {}) {
     },
     tailLog: (n = 20) => { try { return fs.readFileSync('data/bot.log', 'utf8').trim().split('\n').slice(-n).join('\n'); } catch { return '(no log yet)'; } },
     pool: () => pollFarmerPool(rest),
+    leaderboard: async (category = 'farmRank', limit = 20) => {
+      const safeCategory = ['farmRank', 'farmValue', 'ordersCompleted', 'jobsClaimed', 'landOwned', 'cropMastery', 'starfruitHarvests'].includes(category)
+        ? category
+        : 'farmRank';
+      const safeLimit = Math.max(5, Math.min(50, Number(limit) || 20));
+      const r = await rest.req(`/api/leaderboard?category=${encodeURIComponent(safeCategory)}&limit=${safeLimit}`, { timeoutMs: 25000, retries: 1 });
+      return r.status === 200 ? r.json : null;
+    },
     claimPool: () => maybeContribute(rest, { tag, burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level }),
     walletInfo: () => getWalletInfo(),
     withdraw: () => withdrawFarm(config.withdrawAddress),
@@ -315,7 +323,7 @@ export async function runAccount(account = {}) {
   // Only the MAIN account runs the Telegram bot; sub accounts are headless farmers that
   // share the main bot's notifier and report into the shared registry (for /accounts).
   const tg = isMain ? startTelegram(ctx) : (sharedTg || { notify() {} });
-  reg.set(label, { label, isMain, addr, state, flags, stats, rest, keypair });
+  reg.set(label, { label, isMain, addr, playerId: session.persistentPlayerId, displayName, state, flags, stats, rest, keypair });
 
   // Re-auth on (re)connect. Refresh Supabase only when its JWT is near expiry, and
   // REUSE the existing wallet session token until it's near its own 30-min expiry —
@@ -544,7 +552,19 @@ export async function runAccount(account = {}) {
   let poolNotified = false, poolLastSummary = 0, starGateWarned = false, poolOpenNotified = false, earlyBirdNotified = false;
   (async function farmerPoolLoop() {
     while (flags.running) {
-      if (!config.pool.enabled || !flags.connected || state.level < 30) {
+      if (!config.pool.enabled) {
+        await sleep(gaussianDelay(540000, 660000));
+        continue;
+      }
+      // On boot/reconnect the loop can start before the socket joins and before the
+      // first farmState sync updates level from the default L1. Retry readiness checks
+      // quickly so pool contribution starts soon after "server up / auto-rejoined"
+      // instead of sleeping a full 9-11 minutes.
+      if (!flags.connected || state.level <= 1) {
+        await sleep(gaussianDelay(30000, 60000));
+        continue;
+      }
+      if (state.level < 30) {
         await sleep(gaussianDelay(540000, 660000));
         continue;
       }

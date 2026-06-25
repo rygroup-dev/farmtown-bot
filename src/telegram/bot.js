@@ -24,6 +24,7 @@ export const COMMAND_MENU = [
   ['mastery', 'Crop mastery'],
   ['stats', 'Lifetime stats'],
   ['pool', 'Farmer pool ($FARM) status'],
+  ['leaderboard', 'Pool/top farmers rank'],
   ['economy', 'Top crops by profit'],
   ['wallet', 'Wallet address'],
   ['accounts', 'All accounts + balances'],
@@ -60,6 +61,44 @@ export const COMMAND_MENU = [
   ['ping', 'Connectivity check'],
   ['help', 'List all commands'],
 ];
+
+const LEADERBOARD_CATEGORIES = {
+  farmRank: 'Farm Rank',
+  farmValue: 'Farm Value',
+  ordersCompleted: 'Orders',
+  jobsClaimed: 'Jobs',
+  landOwned: 'Land',
+  cropMastery: 'Mastery',
+  starfruitHarvests: 'Starfruit',
+};
+
+function rankLabel(n) {
+  return n ? `#${fmt(n)}` : '#?';
+}
+
+function poolParticipantLine(p, rank, label = null) {
+  const name = esc(label || p.displayName || p.playerName || p.name || 'Farmer');
+  const power = p.claimPower ?? p.contributedClaimPowerToday ?? 0;
+  const payoutRaw = p.estimatedPayoutRaw ?? 0;
+  const payout = Number(payoutRaw || 0) / 1e6;
+  const share = p.estimatedShareBps != null ? ` • ${(Number(p.estimatedShareBps || 0) / 100).toFixed(2)}%` : '';
+  return `${p.isCurrentPlayer ? '⭐' : '•'} <b>${rankLabel(rank)}</b> ${name} — ⚡${fmt(power)} power • 💰${payout.toFixed(2)} FARM${share}`;
+}
+
+function topFarmerValue(category, entry) {
+  const value = entry.leaderboardValue ?? entry[category] ?? entry.farmRank ?? 0;
+  if (category === 'ordersCompleted') return `${fmt(value)} orders`;
+  if (category === 'jobsClaimed') return `${fmt(value)} jobs`;
+  if (category === 'landOwned') return `${fmt(value)} tiles`;
+  if (category === 'starfruitHarvests') return `${fmt(value)} starfruit`;
+  return fmt(value);
+}
+
+function topFarmerLine(category, entry, rank, label = null) {
+  const name = esc(label || entry.playerName || 'Farmer');
+  const you = label ? ` <i>(${esc(entry.playerName || entry.farmSlug || 'matched')})</i>` : '';
+  return `${label ? '⭐' : '•'} <b>${rankLabel(rank)}</b> ${name}${you} — ${topFarmerValue(category, entry)} • L${fmt(entry.level)} • ${fmt(entry.ownedPlots)} plots`;
+}
 
 // Pure-ish command dispatcher — testable with a mock ctx + send. `send(text)` should
 // accept an HTML string. Returns a promise. Never throws (errors are sent as messages).
@@ -229,6 +268,83 @@ export async function dispatchCommand(text, ctx, send) {
           `Hold gate: ${player.meetsHoldGate ? '✅' : '❌'} • Star gate: ${player.meetsStarGate ? '✅' : '❌'}` +
           fleetLine +
           `\n\n<i>Strategy: auto-burns farm points every ~${eb.active ? '5' : '10'} min. Gold burn: /poolburn on. Level sacrifice: burn ${lvlBurn} levels (L${player.level}→L${minAfter}). Stars: collect falling stars (free!) or /starmain starter.</i>`
+        );
+      }
+      case '/leaderboard': {
+        const mode = (args[0] || 'pool').toLowerCase();
+        const topMode = Object.keys(LEADERBOARD_CATEGORIES).find(c => c.toLowerCase() === mode);
+
+        if (mode === 'pool' || mode === 'farmpool' || mode === 'farmerpool') {
+          const p = await ctx.pool();
+          if (!p) return send('🏆 <b>Farmer Pool Leaderboard</b>\nStatus unavailable (server slow / not logged in).');
+          const participants = Array.isArray(p.participants) ? p.participants : [];
+          const cfg = p.config || {};
+          const pool = p.pool || {};
+          const top = participants.slice(0, 10);
+          const lines = top.length
+            ? top.map((row, i) => poolParticipantLine(row, i + 1))
+            : ['No sacrifices recorded yet / server did not return participants.'];
+
+          const ours = [];
+          const mainIdx = participants.findIndex(row => row.isCurrentPlayer);
+          if (mainIdx >= 0) ours.push(poolParticipantLine(participants[mainIdx], mainIdx + 1, 'main'));
+          else {
+            const player = p.player || {};
+            ours.push(`⭐ <b>main</b> — rank not in current participant list • ⚡${fmt(player.contributedClaimPowerToday || 0)} power • 💰${(Number(player.estimatedPayoutRaw || 0) / 1e6).toFixed(2)} FARM`);
+          }
+
+          if (ctx.registry?.size > 1) {
+            const { pollFarmerPool: pollSub } = await import('../game/farmerpool.js');
+            for (const [lbl, eng] of ctx.registry) {
+              if (eng.isMain) continue;
+              try {
+                const sp = await pollSub(eng.rest);
+                const subParts = Array.isArray(sp?.participants) ? sp.participants : [];
+                const idx = subParts.findIndex(row => row.isCurrentPlayer);
+                if (idx >= 0) ours.push(poolParticipantLine(subParts[idx], idx + 1, lbl));
+                else {
+                  const pl = sp?.player || {};
+                  ours.push(`⭐ <b>${esc(lbl)}</b> — rank not in current participant list • ⚡${fmt(pl.contributedClaimPowerToday || 0)} power • 💰${(Number(pl.estimatedPayoutRaw || 0) / 1e6).toFixed(2)} FARM${pl.meetsStarGate === false ? ' 🔒star' : ''}${pl.meetsHoldGate === false ? ' 🔒hold' : ''}`);
+                }
+              } catch {
+                ours.push(`⚠️ <b>${esc(lbl)}</b> — pool status unreachable`);
+              }
+            }
+          }
+
+          return send(
+            `🏆 <b>Farmer Pool Leaderboard</b>\n` +
+            `Status: <b>${esc(pool.status || 'unknown')}</b> • Date: ${esc(pool.poolDate || 'n/a')} • Token: ${esc(cfg.tokenSymbol || 'FARM')}\n\n` +
+            `<b>Top Participants</b>\n${lines.join('\n')}\n\n` +
+            `<b>Our Accounts</b>\n${ours.join('\n')}\n\n` +
+            `<i>Tip: /leaderboard farmRank, farmValue, ordersCompleted, jobsClaimed, landOwned, cropMastery, starfruitHarvests</i>`
+          );
+        }
+
+        if (!topMode) {
+          return send('🏆 Usage: <code>/leaderboard</code> for Farmer Pool, or <code>/leaderboard farmRank|farmValue|ordersCompleted|jobsClaimed|landOwned|cropMastery|starfruitHarvests</code>');
+        }
+        if (!ctx.leaderboard) return send('🏆 Top Farmers leaderboard not available in this build.');
+
+        const data = await ctx.leaderboard(topMode, 20);
+        const entries = Array.isArray(data?.entries) ? data.entries : [];
+        if (!entries.length) return send(`🏆 <b>${esc(LEADERBOARD_CATEGORIES[topMode])}</b>\nNo leaderboard data (server slow / unavailable).`);
+
+        const topLines = entries.slice(0, 10).map((entry, i) => topFarmerLine(topMode, entry, i + 1));
+        const ours = [];
+        if (ctx.registry?.size) {
+          for (const [lbl, eng] of ctx.registry) {
+            const idx = entries.findIndex(entry => entry.playerId && eng.playerId && entry.playerId === eng.playerId);
+            if (idx >= 0) ours.push(topFarmerLine(topMode, entries[idx], idx + 1, lbl));
+            else ours.push(`⭐ <b>${esc(lbl)}</b> — not in top ${entries.length} returned by server${eng.state?.farmRank != null ? ` • farm rank score ${fmt(eng.state.farmRank)}` : ''}`);
+          }
+        }
+
+        return send(
+          `🏆 <b>Top Farmers — ${esc(LEADERBOARD_CATEGORIES[topMode])}</b>\n` +
+          `${topLines.join('\n')}\n` +
+          (ours.length ? `\n<b>Our Accounts</b>\n${ours.join('\n')}\n` : '') +
+          `\n<i>Source: /api/leaderboard category=${esc(topMode)}. Server returns rank window, so accounts outside that window are shown as not in top ${entries.length}.</i>`
         );
       }
       case '/economy':
@@ -498,7 +614,7 @@ export async function dispatchCommand(text, ctx, send) {
       case '/help':
         return send(
           `📖 <b>FarmTown Sentinel</b>\n\n` +
-          `<b>INFO</b> /status /balance /farm /inventory /basket /orders /jobs /quests /mastery /stats /pool /economy /wallet\n\n` +
+          `<b>INFO</b> /status /balance /farm /inventory /basket /orders /jobs /quests /mastery /stats /pool /leaderboard /economy /wallet\n\n` +
           `<b>MULTI-ACCOUNT</b> /accounts /subacc /genwallets /mintsession /sweep\n` +
           `<b>STARS &amp; FUND</b> /starmain /starsub /sendfarm /sendfee /retrystar\n\n` +
           `<b>CONTROL</b> /start /stop /pause /resume /autopilot /objective /setcrop /reserve /sethours /poolburn\n\n` +

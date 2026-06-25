@@ -39,8 +39,27 @@ function mockCtx() {
     pool: async () => ({
       config: { enabled: true, minLevel: 10, tokenSymbol: 'FARM' },
       pool: { status: 'active', poolDate: '2026-06-21', totalTokensAllocatedRaw: '4400000000000', activeParticipantCount: 2100 },
-      player: { level: 12, gold: 5000, availableFarmPoints: 88, unlocked: true, hasContributionToday: false, estimatedPayoutRaw: '1234567' },
+      player: { level: 12, gold: 5000, availableFarmPoints: 88, unlocked: true, hasContributionToday: false, estimatedPayoutRaw: '1234567', contributedClaimPowerToday: 12 },
+      participants: [
+        { displayName: 'Whale', claimPower: 500, estimatedPayoutRaw: '5000000', estimatedShareBps: 5000 },
+        { displayName: 'ohmaylord', claimPower: 12, estimatedPayoutRaw: '1234567', estimatedShareBps: 1234, isCurrentPlayer: true },
+      ],
     }),
+    leaderboard: async (category) => ({
+      ok: true,
+      category,
+      entries: [
+        { playerId: 'p1', playerName: 'BoxSol', level: 30, ownedPlots: 169, leaderboardValue: 1000, farmRank: 1000 },
+        { playerId: 'main-player', playerName: 'ohmaylord', level: 12, ownedPlots: 6, leaderboardValue: 42, farmRank: 42 },
+      ],
+    }),
+    registry: new Map([['main', {
+      label: 'main',
+      isMain: true,
+      playerId: 'main-player',
+      state,
+      flags: { connected: true },
+    }]]),
     claimPool: async () => ({ ok: true, contributed: true }),
     manual: (kind, arg) => calls.manual.push([kind, arg]),
     setConfig: (k, v) => { calls.config.push([k, v]); return `${k} = ${v}`; },
@@ -129,6 +148,24 @@ test('/pool shows OPEN + early bird when pool is active', async () => {
   assert.match(m, /OPEN/);
   assert.match(m, /Early bird/);
   assert.match(m, /✅ eligible/);
+});
+
+test('/leaderboard shows pool participants and our account rank', async () => {
+  const { ctx } = mockCtx();
+  const { send, msgs } = recorder();
+  await dispatchCommand('/leaderboard', ctx, send);
+  assert.match(msgs[0], /Farmer Pool Leaderboard/);
+  assert.match(msgs[0], /Top Participants/);
+  assert.match(msgs[0], /<b>#2<\/b> main/);
+});
+
+test('/leaderboard category shows top farmers and matched own account', async () => {
+  const { ctx } = mockCtx();
+  const { send, msgs } = recorder();
+  await dispatchCommand('/leaderboard farmRank', ctx, send);
+  assert.match(msgs[0], /Top Farmers/);
+  assert.match(msgs[0], /Farm Rank/);
+  assert.match(msgs[0], /<b>#2<\/b> main/);
 });
 
 test('/log HTML-escapes special chars (no broken markup)', async () => {
