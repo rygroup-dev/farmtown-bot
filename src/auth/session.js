@@ -36,7 +36,6 @@ export async function refreshSupabase(session, rest) {
     session.access_token = r.json.access_token;
     session.refresh_token = r.json.refresh_token || session.refresh_token;
     session.obtainedAt = Date.now();
-    saveSession(session);
     log.info('SESSION', 'Supabase token refreshed');
     return true;
   }

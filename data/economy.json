@@ -226,5 +226,77 @@
     "unlockLevel": 30,
     "profitPerHour": 2778,
     "xpPerHour": 67
+  },
+  "moonberry": {
+    "id": "moonberry",
+    "seedId": "moonberry_seed",
+    "cost": 70000,
+    "sell": 150000,
+    "growSeconds": 72000,
+    "deathSeconds": 3600,
+    "xp": 1500,
+    "unlockLevel": 33,
+    "profitPerHour": 4000,
+    "xpPerHour": 75
+  },
+  "sunpetal_squash": {
+    "id": "sunpetal_squash",
+    "seedId": "sunpetal_squash_seed",
+    "cost": 95000,
+    "sell": 205000,
+    "growSeconds": 79200,
+    "deathSeconds": 3600,
+    "xp": 1900,
+    "unlockLevel": 36,
+    "profitPerHour": 5000,
+    "xpPerHour": 86
+  },
+  "frost_melon": {
+    "id": "frost_melon",
+    "seedId": "frost_melon_seed",
+    "cost": 130000,
+    "sell": 285000,
+    "growSeconds": 86400,
+    "deathSeconds": 3600,
+    "xp": 2400,
+    "unlockLevel": 39,
+    "profitPerHour": 6458,
+    "xpPerHour": 100
+  },
+  "goldroot": {
+    "id": "goldroot",
+    "seedId": "goldroot_seed",
+    "cost": 175000,
+    "sell": 390000,
+    "growSeconds": 93600,
+    "deathSeconds": 3600,
+    "xp": 3000,
+    "unlockLevel": 42,
+    "profitPerHour": 8269,
+    "xpPerHour": 115
+  },
+  "aurora_grape": {
+    "id": "aurora_grape",
+    "seedId": "aurora_grape_seed",
+    "cost": 235000,
+    "sell": 520000,
+    "growSeconds": 100800,
+    "deathSeconds": 3600,
+    "xp": 3700,
+    "unlockLevel": 45,
+    "profitPerHour": 10179,
+    "xpPerHour": 132
+  },
+  "phoenix_chili": {
+    "id": "phoenix_chili",
+    "seedId": "phoenix_chili_seed",
+    "cost": 310000,
+    "sell": 690000,
+    "growSeconds": 108000,
+    "deathSeconds": 3600,
+    "xp": 4500,
+    "unlockLevel": 48,
+    "profitPerHour": 12667,
+    "xpPerHour": 150
   }
 }

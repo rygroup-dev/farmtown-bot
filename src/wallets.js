@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import bs58 from 'bs58';
 import { Keypair } from '@solana/web3.js';
+import { config } from './config.js';
 
 export const MAX_SUB_WALLETS = 1000; // + 1 main = 1001 total
 const FILE = 'data/wallets.json';
@@ -33,20 +34,29 @@ function saveSubWallets(list, file = FILE) {
 
 // Generate up to `count` NEW sub wallets, append to the store (never exceeding the cap),
 // and return the full updated list. Returns { added, total, wallets }.
+// GUARDS: never accepts a generated keypair that equals the main .env wallet's publicKey
+// (defensive against a 1-time identity collision that polluted the live data set). Also
+// strips any pre-existing duplicate entries (legacy data) before persisting.
 export function generateSubWallets(count, file = FILE) {
   const list = loadSubWallets(file);
   const room = Math.max(0, MAX_SUB_WALLETS - list.length);
   const toAdd = Math.max(0, Math.min(Number(count) || 0, room));
+  const mainAddress = config.keypair.publicKey.toBase58();
   for (let i = 0; i < toAdd; i++) {
     const kp = Keypair.generate();
+    if (kp.publicKey.toBase58() === mainAddress) { i--; continue; } // retry this iteration — never collide with main
     list.push({
       index: list.length + 1, // 1-based sub index (main is account #1 separately)
       publicKey: kp.publicKey.toBase58(),
       secretKey: bs58.encode(kp.secretKey),
     });
   }
-  if (toAdd > 0) saveSubWallets(list, file);
-  return { added: toAdd, total: list.length, room: room - toAdd, wallets: list };
+  // Defensive: drop any pre-existing entry whose pubkey collides with main (legacy data).
+  const before = list.length;
+  const deduped = list.filter((w) => w.publicKey !== mainAddress);
+  if (deduped.length !== before) list.length = 0, list.push(...deduped);
+  if (toAdd > 0 || deduped.length !== before) saveSubWallets(list, file);
+  return { added: toAdd, total: list.length, room: Math.max(0, room - toAdd), wallets: list };
 }
 
 // Build the full account roster: main (#1) + every stored sub wallet, each as

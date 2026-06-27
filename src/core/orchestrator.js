@@ -10,7 +10,7 @@ import { subSessionStore, hasSubSession } from '../sub_sessions.js';
 import { GameSocket } from '../net/socket.js';
 import { GameState } from '../game/state.js';
 import { ActionRunner } from '../game/actions.js';
-import { planActions, planClaims, planStorage } from '../game/brain.js';
+import { planActions, planClaims, planStorage, planAnimalActions } from '../game/brain.js';
 import { loadEconomy } from '../game/economy.js';
 import { maybeContribute, pollFarmerPool, poolTiming, decideCropSacrifice, SACRIFICE_CROPS } from '../game/farmerpool.js';
 import { getWalletInfo, withdrawFarm, buyStars, sendFarmTo, sendSolTo, getPendingStars, retryPendingStar } from '../game/wallet_info.js';
@@ -25,7 +25,7 @@ import { startTelegram } from '../telegram/bot.js';
 // the token is within `expiringSoonFn`'s window. Best-effort: bind errors are logged
 // and swallowed (the reconnect path will pick up a true re-bind if needed).
 export async function proactiveWalletRefresh({
-  session, rest, keypair, sessionStore, tag,
+  session, rest, keypair, sessionStore, tag, walletAddress = null,
   bindWalletFn = bindWallet,
   expiringSoonFn = walletSessionExpiringSoon,
   log,
@@ -34,6 +34,7 @@ export async function proactiveWalletRefresh({
   try {
     const v = await bindWalletFn(rest, keypair);
     session.walletSessionToken = v.walletSessionToken;
+    if (walletAddress) session.walletAddress = walletAddress;
     sessionStore.save(session);
     log.info('AUTH', `${tag}proactively renewed walletSessionToken`);
     return { renewed: true };
@@ -58,7 +59,10 @@ export async function ensureSupabaseFresh({
   log,
 }) {
   if (!force && !supabaseExpiringSoonFn(session)) return false;
-  if (await refreshSupabaseFn(session, rest)) return false;
+  if (await refreshSupabaseFn(session, rest)) {
+    sessionStore.save(session);
+    return false;
+  }
   if (captchaEnabledFn()) {
     log.warn('AUTH', tag + 'supabase refresh failed → minting fresh session via captcha');
     const fresh = await mintSessionFn(rest);
@@ -146,7 +150,7 @@ export async function runAccount(account = {}) {
     if (session.cookieHeader) rest.setCookie(session.cookieHeader);
     rest.setBearer(session.access_token);
     let v;
-    if (!reminted && session.walletSessionToken && !walletSessionExpiringSoon(session)) {
+    if (!reminted && session.walletSessionToken && session.walletAddress === addr && !walletSessionExpiringSoon(session)) {
       // REUSE a still-valid persisted wallet session (30-min life) on boot instead of
       // ALWAYS hammering the slow /api/auth/wallet/verify. That heavy endpoint is the
       // one that degrades server-side; binding it on every (re)start would block the
@@ -161,14 +165,32 @@ export async function runAccount(account = {}) {
       rest.setWalletSession(session.walletSessionToken); // x-farmtown-wallet-session header
     }
     session.persistentPlayerId = walletSessionPlayerId(session.walletSessionToken) || session.persistentPlayerId || crypto.randomUUID();
+    session.walletAddress = addr;
     // Set the in-game display name server-side (best-effort).
     try { await rest.req('/api/auth/profile', { method: 'POST', retries: 0, timeoutMs: 20000, body: { displayName } }); } catch {}
     sessionStore.save(session);
     return v;
   }
-  let verified, authAttempt = 0;
+  let verified, authAttempt = 0, collisionAttempt = 0;
   while (flags.running) {
-    try { verified = await authenticate(); break; }
+    try {
+      verified = await authenticate();
+      const existing = [...reg.values()].find(e => e.addr !== addr && e.playerId && e.playerId === session.persistentPlayerId);
+      if (existing) {
+        const msg = `${tag}playerId collision with ${existing.label} (${session.persistentPlayerId})`;
+        if (!isMain && captchaEnabled() && collisionAttempt < 2) {
+          collisionAttempt++;
+          log.warn('AUTH', `${msg} — dropping sub session and minting a fresh isolated session (${collisionAttempt}/2)`);
+          sessionStore.remove?.();
+          session = await mintSession(rest);
+          continue;
+        }
+        log.error('AUTH', `${msg} — refusing to run this account to avoid main/sub conflict`);
+        flags.running = false;
+        return;
+      }
+      break;
+    }
     catch (e) {
       authAttempt++;
       const wait = Math.min(5000 * authAttempt, 60000);
@@ -196,7 +218,7 @@ export async function runAccount(account = {}) {
       const r = await rest.req(`/api/leaderboard?category=${encodeURIComponent(safeCategory)}&limit=${safeLimit}`, { timeoutMs: 25000, retries: 1 });
       return r.status === 200 ? r.json : null;
     },
-    claimPool: () => maybeContribute(rest, { tag, burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level }),
+    claimPool: () => maybeContribute(rest, { tag, burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level, cropInventory: state.cropInventory }),
     walletInfo: () => getWalletInfo(),
     withdraw: () => withdrawFarm(config.withdrawAddress),
     withdrawAddress: config.withdrawAddress,
@@ -340,10 +362,11 @@ export async function runAccount(account = {}) {
     // local expiry heuristic: a locally-unexpired token the server no longer honors would
     // otherwise be reused forever (infinite reconnect loop). When forced, re-bind even
     // though walletSessionExpiringSoon() still says the token is fine.
-    if (reminted || forceWalletReverify || walletSessionExpiringSoon(session)) {
+    if (reminted || forceWalletReverify || session.walletAddress !== addr || walletSessionExpiringSoon(session)) {
       const v = await bindWallet(rest, keypair);
       session.walletSessionToken = v.walletSessionToken;
       session.persistentPlayerId = walletSessionPlayerId(session.walletSessionToken) || session.persistentPlayerId;
+      session.walletAddress = addr;
       sessionStore.save(session);
       log.info('AUTH', tag + (reminted ? 're-verified wallet (fresh minted session)' : forceWalletReverify ? 're-verified wallet (server rejected session)' : 're-verified wallet (session was expiring)'));
       forceWalletReverify = false;
@@ -370,15 +393,15 @@ export async function runAccount(account = {}) {
         if (kind === 'recovered') tg.notify(`${tag}✅ <b>SERVER BACK UP</b> — auto-rejoined.\nLevel ${state.level} • gold ${state.gold}`);
         else tg.notify(`${tag}🟢 joined farm — level ${state.level} • gold ${state.gold}`);
       }
-      if (ev === 'game:actionResult' && data.ok) log.info('ACT', (data.type || '?') + ' ok' + (data.message ? (' — ' + data.message) : ''));
+      if (ev === 'game:actionResult' && data.ok) log.info('ACT', tag + (data.type || '?') + ' ok' + (data.message ? (' — ' + data.message) : ''));
       if (ev === 'game:actionResult' && data.ok && data.fallingStar?.status === 'claimed') {
         const reward = data.fallingStar.rewardStars || 0;
         log.info('STAR', `${tag}⭐ Falling star claimed! +${reward} star(s) → total ${state.stars}`);
         tg.notify(`${tag}⭐ Falling star collected! +${reward} star(s) (total: ${state.stars})`);
       }
-      if (ev === 'game:error' || ev === 'farm:error') log.warn('GAMEERR', (data.code || '?') + ' ' + (data.message || ''));
+      if (ev === 'game:error' || ev === 'farm:error') log.warn('GAMEERR', tag + (data.code || '?') + ' ' + (data.message || ''));
       if (ev === 'game:actionResult' && data.ok) lastActionAt = Date.now();
-      if (ev === 'player:farmState/sync') { const now = Date.now(); if (now - lastStateLog >= 30000) { lastStateLog = now; log.info('STATE', `gold=${state.gold} lvl=${state.level} stars=${state.stars} | owned=${state.ownedTiles().length} grass=${state.grassEmpty().length} tilled=${state.tilledEmpty().length} ready=${state.readyToHarvest().length} dead=${state.deadCrops().length} blocked=${state.blocked().length} expandable=${state.expandableTiles().length} orders=${state.completableOrders().length}/${state.orders.length} jobs=${state.claimableJobs().length} fallingStars=${state.claimableFallingStars().length}`); } }
+      if (ev === 'player:farmState/sync') { const now = Date.now(); if (now - lastStateLog >= 30000) { lastStateLog = now; log.info('STATE', `${tag}gold=${state.gold} lvl=${state.level} stars=${state.stars} | owned=${state.ownedTiles().length} grass=${state.grassEmpty().length} tilled=${state.tilledEmpty().length} ready=${state.readyToHarvest().length} dead=${state.deadCrops().length} blocked=${state.blocked().length} expandable=${state.expandableTiles().length} orders=${state.completableOrders().length}/${state.orders.length} jobs=${state.claimableJobs().length} fallingStars=${state.claimableFallingStars().length}`); } }
     });
     let lastQueueLog = 0, queuedNotified = false;
     gs.on('queue', (d) => {
@@ -389,7 +412,7 @@ export async function runAccount(account = {}) {
     gs.on('joined', () => {
       const firstJoin = !flags.connected; // the server can emit 'joined' twice — dedupe the notification
       flags.connected = true; reconnecting = false; reconnectAttempt = 0; lastActionAt = Date.now(); gs.refreshSnapshot();
-      log.info('JOINED', 'farm gold=' + state.gold + ' level=' + state.level + ' owned=' + state.ownedTiles().length);
+      log.info('JOINED', tag + 'farm gold=' + state.gold + ' level=' + state.level + ' owned=' + state.ownedTiles().length);
       if (!firstJoin) return;
       // Defer the actual notification to the first farmState/sync (real level/gold).
       // The user ALWAYS gets a labelled "server up / back in" ping per (re)join.
@@ -526,6 +549,7 @@ export async function runAccount(account = {}) {
       try {
         if (supabaseExpiringSoon(session)) {
           const okR = await refreshSupabase(session, rest);
+          if (okR) sessionStore.save(session);
           // refresh_token is dead (rotated/expired — the post-restart failure mode). Don't
           // just warn every 60s and rely on the action-path rescue: drive the real recovery
           // here. A reconnect whose reason matches supabaseRemintRequired() forces the next
@@ -538,7 +562,7 @@ export async function runAccount(account = {}) {
         // Proactively re-bind the walletSessionToken BEFORE it expires — avoids hitting
         // the slow /api/auth/wallet/verify on every reconnect (each bind is multi-RTT).
         // Best-effort; the reconnect path will pick up the slack if a true re-bind is needed.
-        await proactiveWalletRefresh({ session, rest, keypair, sessionStore, tag, log });
+        await proactiveWalletRefresh({ session, rest, keypair, sessionStore, tag, walletAddress: addr, log });
         await keepWalletSessionAlive(rest);
       } catch (e) { log.warn('KEEPALIVE', e.message); }
       await sleep(60000);
@@ -598,6 +622,11 @@ export async function runAccount(account = {}) {
 
       const r = await maybeContribute(rest, { tag, burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level, cropInventory: state.cropInventory });
       if (r?.contributed) {
+        if (r.contribution?.cropSacrifices) {
+          for (const [cropId, qty] of Object.entries(r.contribution.cropSacrifices)) {
+            state.cropInventory[cropId] = Math.max(0, Number(state.cropInventory[cropId] || 0) - Number(qty || 0));
+          }
+        }
         const cropSac = decideCropSacrifice(state.cropInventory);
         if (cropSac) {
           const parts = Object.entries(cropSac.crops).map(([c, n]) => `${n} ${c}`).join(', ');
@@ -655,6 +684,7 @@ export async function runAccount(account = {}) {
         const effectiveObjective = autoXp ? 'xp' : flags.objective;
         const plan = [
           ...planClaims(state),
+          ...planAnimalActions(state),
           ...planActions(state, ecoForPlant, { objective: effectiveObjective, timeBudgetSeconds, goldReserve: settings.goldReserve, sacrificeRatio: config.pool.enabled ? 0.5 : 0 }),
           ...planStorage(state),
         ];
@@ -663,6 +693,7 @@ export async function runAccount(account = {}) {
             if (!flags.running || flags.paused) break;
             const ok = await runner.do(a.event, a.payload, a.meta);
             if (ok) lastActionAt = Date.now();
+            else log.warn('ACTFAIL', `${tag}${a.kind || a.event} failed payload=${JSON.stringify(a.payload).slice(0, 180)}`);
             if (a.kind === 'harvest' && ok) stats.harvests++;
             if (a.kind === 'plant' && ok) stats.plants++;
           }

@@ -14,5 +14,8 @@ test('subSessionStore load/save round-trips per label, chmod 600', () => {
   assert.equal(hasSubSession('sub1', f), true);
   assert.equal(hasSubSession('subX', f), false);
   assert.equal(fs.statSync(f).mode & 0o777, 0o600);
+  s1.remove();
+  assert.equal(s1.load(), null);
+  assert.equal(s2.load().access_token, 'a2');
   fs.unlinkSync(f);
 });

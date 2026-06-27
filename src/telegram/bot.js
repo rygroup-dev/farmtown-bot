@@ -135,7 +135,38 @@ export async function dispatchCommand(text, ctx, send) {
         const owned = s.ownedTiles().length, grass = s.grassEmpty().length, tilled = s.tilledEmpty().length;
         const ready = s.readyToHarvest().length, blocked = s.blocked().length, dead = s.deadCrops().length;
         const planted = Math.max(0, owned - grass - tilled - ready - blocked - dead);
-        return send(`🌾 <b>Farm</b>\n🏡 Owned: ${owned}\n🟩 Grass: ${grass}\n🟫 Tilled: ${tilled}\n🌱 Growing: ${planted}\n✅ Ready: ${ready}\n💀 Dead: ${dead}\n🚫 Blocked: ${blocked}`);
+        // Animal / barn section
+        const barnEntries = Object.entries(s.barns || {});
+        let animalSection = '';
+        if (barnEntries.length) {
+          const now = Date.now();
+          const ANIM = { cow: { produceId: 'milk', feedCropId: 'wheat', feedAmount: 25, productionIntervalMs: 10800000 } };
+          const barnLines = barnEntries.map(([barnId, barn]) => {
+            const slots = barn.slots || [];
+            const feed = barn.feed || {};
+            const slotLines = slots.map((animalId, i) => {
+              if (!animalId) return `    Slot ${i + 1}: empty`;
+              const cfg = ANIM[animalId];
+              const lastFed = feed[String(i)];
+              let stateLabel;
+              if (lastFed == null) stateLabel = '🍽️ hungry';
+              else if (now >= lastFed + (cfg?.productionIntervalMs || 0)) stateLabel = '✅ ready to collect';
+              else {
+                const left = Math.ceil(((lastFed + (cfg?.productionIntervalMs || 0)) - now) / 60000);
+                stateLabel = `⏳ producing (${left}m left)`;
+              }
+              return `    Slot ${i + 1}: ${animalId} — ${stateLabel}`;
+            });
+            return `  🏚️ Barn <code>${esc(barnId.slice(0, 8))}</code>\n${slotLines.join('\n')}`;
+          });
+          const resourceLines = Object.entries(s.resourceInventory || {}).filter(([, v]) => v > 0)
+            .map(([k, v]) => `${esc(k)}: ${fmt(v)}`).join(', ');
+          animalSection = `\n\n🐄 <b>Animals</b>\n${barnLines.join('\n')}` +
+            (resourceLines ? `\n  🥛 Produce: ${resourceLines}` : '');
+        } else {
+          animalSection = '\n\n🐄 <b>Animals</b>: no barn yet';
+        }
+        return send(`🌾 <b>Farm</b>\n🏡 Owned: ${owned}\n🟩 Grass: ${grass}\n🟫 Tilled: ${tilled}\n🌱 Growing: ${planted}\n✅ Ready: ${ready}\n💀 Dead: ${dead}\n🚫 Blocked: ${blocked}${animalSection}`);
       }
       case '/inventory':
       case '/seeds': {
@@ -153,8 +184,10 @@ export async function dispatchCommand(text, ctx, send) {
         const ok = new Set((s.completableOrders() || []).map(o => o.id));
         const lines = orders.map(o => {
           const reqs = Object.entries(o.requires || {}).map(([c, q]) => `${esc(c)}×${q}`).join(', ');
+          const prod = Object.entries(o.requiresProduce || {}).map(([p, q]) => `🥛${esc(p)}×${q}`).join(', ');
+          const needStr = [reqs, prod].filter(Boolean).join(', ');
           const rw = [o.rewards?.gold && `💰${fmt(o.rewards.gold)}`, o.rewards?.xp && `✨${fmt(o.rewards.xp)}`].filter(Boolean).join(' ');
-          return `• <b>${esc(o.title || o.id)}</b>${ok.has(o.id) ? ' ✅' : ''}\n  Need: ${reqs}\n  Reward: ${rw}`;
+          return `• <b>${esc(o.title || o.id)}</b>${ok.has(o.id) ? ' ✅' : ''}\n  Need: ${needStr}\n  Reward: ${rw}`;
         });
         return send(`📦 <b>Orders</b>\n${lines.join('\n')}`);
       }
@@ -399,6 +432,7 @@ export async function dispatchCommand(text, ctx, send) {
         const { pollFarmerPool: pollSub } = await import('../game/farmerpool.js');
         const lines = [];
         let totOwned = 0, totStars = 0, totFarm = 0, totGold = 0, totPower = 0, totPayout = 0;
+        const ANIM_CFG = { cow: { productionIntervalMs: 10800000 } };
         for (const e of subs) {
           const st = e.state;
           const owned = st?.ownedTiles?.()?.length ?? 0;
@@ -415,12 +449,37 @@ export async function dispatchCommand(text, ctx, send) {
             if (sp2.meetsStarGate === false) poolGate = ' 🔒star';
             else if (sp2.meetsHoldGate === false) poolGate = ' 🔒hold';
           } catch {}
+          // Animal summary for this sub
+          const barnEntries = Object.entries(st?.barns || {});
+          let animalLine = '';
+          if (barnEntries.length) {
+            const now = Date.now();
+            let hungry = 0, collecting = 0, producing = 0, totalAnimals = 0;
+            for (const [, barn] of barnEntries) {
+              for (let i = 0; i < (barn.slots || []).length; i++) {
+                const animalId = barn.slots[i];
+                if (!animalId) continue;
+                totalAnimals++;
+                const lastFed = (barn.feed || {})[String(i)];
+                const interval = ANIM_CFG[animalId]?.productionIntervalMs || 10800000;
+                if (lastFed == null) hungry++;
+                else if (now >= lastFed + interval) collecting++;
+                else producing++;
+              }
+            }
+            const milk = st?.resourceInventory?.milk || 0;
+            animalLine = `\n  🐄 ${totalAnimals} animal(s) in ${barnEntries.length} barn(s)` +
+              (hungry ? ` • 🍽️ ${hungry} hungry` : '') +
+              (collecting ? ` • ✅ ${collecting} ready` : '') +
+              (producing ? ` • ⏳ ${producing} producing` : '') +
+              (milk ? ` • 🥛 ${fmt(milk)} milk` : '');
+          }
           totOwned += owned; totStars += (st?.stars ?? 0); totFarm += farmBal; totGold += (st?.gold ?? 0);
           totPower += poolPow; totPayout += poolPay;
           lines.push(
             `• <b>${esc(e.label)}</b> ${e.flags?.connected ? '🟢' : '🔴'} <code>${esc(e.addr?.slice(0, 4) + '…' + e.addr?.slice(-4))}</code>\n` +
             `  L${fmt(st?.level)} • 💰${fmt(st?.gold)}g • ⭐${fmt(st?.stars)} stars • 🌾${fmt(Math.floor(farmBal))} $FARM\n` +
-            `  🏡 Plots: ${owned} • ✅ Ready: ${ready}${fStars ? ` • 🌟 Stars: ${fStars}` : ''}\n` +
+            `  🏡 Plots: ${owned} • ✅ Ready: ${ready}${fStars ? ` • 🌟 Stars: ${fStars}` : ''}${animalLine}\n` +
             `  ⚡ Pool power: ${fmt(poolPow)} • 💰 Payout: ${poolPay.toFixed(2)} FARM${poolGate}`
           );
         }

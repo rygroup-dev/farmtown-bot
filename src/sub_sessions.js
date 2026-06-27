@@ -19,6 +19,7 @@ export function subSessionStore(label, file = FILE) {
   return {
     load: () => readAll(file)[label] || null,
     save: (s) => { const m = readAll(file); m[label] = s; writeAll(m, file); },
+    remove: () => { const m = readAll(file); delete m[label]; writeAll(m, file); },
   };
 }
 

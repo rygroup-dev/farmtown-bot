@@ -90,11 +90,11 @@ test('expansion reserve scales with farm size — a big farm waits until truly w
     return s;
   };
   const expands = (s) => planActions(s, eco, { goldReserve: 2000 }).some(a => a.kind === 'buyPlot');
-  // 60-tile farm needs >= 60*250 = 15000 gold to expand
-  assert.equal(expands(mkFarm(60, 10000)), false, 'gold-starved big farm does NOT expand');
-  assert.equal(expands(mkFarm(60, 20000)), true,  'wealthy big farm expands');
-  // small farm only needs the flat floor (2000)
-  assert.equal(expands(mkFarm(3, 5000)), true, 'small farm expands on modest gold');
+  // 60-tile farm: expandReserve=15000, estimatedPlotCost=max(5000,60*60*5)=18000 → need >=33000
+  assert.equal(expands(mkFarm(60, 30000)), false, 'gold-starved big farm does NOT expand');
+  assert.equal(expands(mkFarm(60, 35000)), true,  'wealthy big farm expands');
+  // small farm: expandReserve=2000, estimatedPlotCost=max(5000,3*3*5=45)=5000 → need >=7000
+  assert.equal(expands(mkFarm(3, 7000)), true, 'small farm expands on modest gold');
 });
 
 test('does not expand while there is an unworked backlog (>=4)', () => {

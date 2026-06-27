@@ -10,6 +10,8 @@ export class GameState {
     this.farmValue = 0; this.farmRank = 0; this.farmPoints = 0;
     this.completedOrdersCount = 0; this.completedFarmJobsCount = 0; this.totalHarvestedCrops = 0;
     this.fallingStars = [];
+    this.barns = {};           // barnId → { slots: [animalId|null], feed: {slotIdx: lastFedAt} }
+    this.resourceInventory = {}; // produceId (milk, egg, …) → qty
   }
   key(x, y) { return `${x},${y}`; }
   apply(event, data) {
@@ -42,6 +44,8 @@ export class GameState {
         if (f.completedOrdersCount != null) this.completedOrdersCount = f.completedOrdersCount;
         if (f.completedFarmJobsCount != null) this.completedFarmJobsCount = f.completedFarmJobsCount;
         if (f.totalHarvestedCrops != null) this.totalHarvestedCrops = f.totalHarvestedCrops;
+        if (f.barns) this.barns = f.barns;
+        if (f.resourceInventory) this.resourceInventory = { ...this.resourceInventory, ...f.resourceInventory };
         break;
       }
       case 'tile:update': {
@@ -49,8 +53,22 @@ export class GameState {
         for (const t of (data.changedTiles || [])) this.tiles.set(this.key(t.x, t.y), t);
         break;
       }
+      case 'animal:sync/state': {
+        // Visual animal positions only — barn slot state comes via player:farmState/sync
+        break;
+      }
       case 'game:actionResult': {
+        if (data.goldAfter != null) this.gold = data.goldAfter;
+        else if (data.gold != null) this.gold = data.gold;
+        if (data.xpAfter != null) this.xp = data.xpAfter;
+        else if (data.xp != null) this.xp = data.xp;
+        if (data.levelAfter != null) this.level = data.levelAfter;
+        else if (data.level != null) this.level = data.level;
         if (data.ok && data.inventoryDelta?.seeds) for (const [k, v] of Object.entries(data.inventoryDelta.seeds)) this.inventory[k] = (this.inventory[k] || 0) + v;
+        if (data.ok && data.inventory) this.inventory = { ...this.inventory, ...data.inventory };
+        if (data.ok && data.cropInventory) this.cropInventory = { ...this.cropInventory, ...data.cropInventory };
+        if (data.ok && data.resourceInventory) this.resourceInventory = { ...this.resourceInventory, ...data.resourceInventory };
+        if (data.ok && data.barn) this.barns[data.barn.id] = data.barn;
         if (data.ok && data.tile) this.tiles.set(this.key(data.tile.x, data.tile.y), data.tile);
         if (data.ok) for (const t of (data.changedTiles || [])) this.tiles.set(this.key(t.x, t.y), t);
         if (data.fallingStars) this.fallingStars = data.fallingStars;
@@ -100,7 +118,11 @@ export class GameState {
     ));
   }
   completableOrders() {
-    return this.orders.filter(o => o.requires && Object.entries(o.requires).every(([c, q]) => (this.cropInventory[c] || 0) >= q));
+    return this.orders.filter(o => {
+      if (o.requires && !Object.entries(o.requires).every(([c, q]) => (this.cropInventory[c] || 0) >= q)) return false;
+      if (o.requiresProduce && !Object.entries(o.requiresProduce).every(([p, q]) => (this.resourceInventory[p] || 0) >= q)) return false;
+      return true;
+    });
   }
   claimableJobs() {
     return this.farmJobs.filter(j => (j.current || 0) >= (j.target || Infinity));

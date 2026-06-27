@@ -61,6 +61,25 @@ test('inventoryCapacity defaults to 30 and syncs from farmState', () => {
   assert.strictEqual(s.inventoryCapacity, 75);
 });
 
+test('actionResult updates gold/xp/level from server after buy or sacrifice', () => {
+  const s = new GameState();
+  s.gold = 36623;
+  s.xp = 1000;
+  s.level = 30;
+  s.apply('game:actionResult', {
+    ok: true,
+    type: 'buySeed',
+    goldAfter: 11623,
+    xpAfter: 1000,
+    levelAfter: 30,
+    inventoryDelta: { seeds: { crystal_berry_seed: 1 } },
+  });
+  assert.strictEqual(s.gold, 11623);
+  assert.strictEqual(s.xp, 1000);
+  assert.strictEqual(s.level, 30);
+  assert.strictEqual(s.inventory.crystal_berry_seed, 1);
+});
+
 test('seedCount sums all seed inventory values', () => {
   const s = new GameState();
   s.inventory = { potato_seed: 10, carrot_seed: 5, tomato_seed: 0 };

@@ -75,15 +75,15 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
   }
 
   // Auto-expand CONSERVATIVELY: buy an adjacent locked plot only when (a) the farm has
-  // very little unworked backlog, and (b) we still hold a reserve big enough to KEEP THE
-  // WHOLE FARM SEEDED — the reserve scales with farm size (~250 gold/owned tile) so a
-  // large farm never starves its own replanting (the old flat 2k reserve drained gold,
-  // causing "Not enough gold" + idle). New plots arrive wild → cleared → hoed → planted.
+  // very little unworked backlog, and (b) gold covers both the seed reserve and an
+  // estimated plot price. FarmTown's plot price scales sharply with owned land; using
+  // only a flat reserve causes large farms to spam "Not enough gold" on buyPlot.
   const expandable = state.expandableTiles();
   const ownedCount = state.ownedTiles().length;
   const expandReserve = Math.max(goldReserve, ownedCount * 250);
+  const estimatedPlotCost = Math.max(5000, Math.ceil(ownedCount * ownedCount * 5));
   const unworked = state.blocked().length + state.hoeable().length + state.tilledEmpty().length + state.deadCrops().length;
-  if (expandable.length && state.gold >= expandReserve && unworked < 4) {
+  if (expandable.length && state.gold >= expandReserve + estimatedPlotCost && unworked < 4) {
     const t = expandable[0];
     plan.push({ kind:'buyPlot', event:'plot:buy/request', payload:{ tileX:t.x, tileY:t.y }, meta:null });
   }
@@ -91,17 +91,50 @@ export function planActions(state, eco, { objective = 'gold', maxPlantsPerTick =
 }
 
 const STORAGE_TIERS = [
-  { itemId: 'small_storage_crate', cap: 75, cost: 25000 },
-  { itemId: 'big_storage_crate', cap: 125, cost: 100000 },
-  { itemId: 'farm_storage_chest', cap: 200, cost: 500000 },
+  { itemId: 'small_storage_crate',   cap: 75,  cost: 25000,    unlockLevel: 0  },
+  { itemId: 'big_storage_crate',     cap: 125, cost: 100000,   unlockLevel: 0  },
+  { itemId: 'farm_storage_chest',    cap: 200, cost: 500000,   unlockLevel: 0  },
+  { itemId: 'grand_storage_vault',   cap: 300, cost: 1500000,  unlockLevel: 35 },
+  { itemId: 'mega_storage_depot',    cap: 450, cost: 4000000,  unlockLevel: 45 },
 ];
 
 export function planStorage(state, { goldReserve = 5000 } = {}) {
-  const next = STORAGE_TIERS.find(t => t.cap > state.inventoryCapacity);
+  const next = STORAGE_TIERS.find(t => t.cap > state.inventoryCapacity && (t.unlockLevel || 0) <= state.level);
   if (!next) return [];
   if (state.gold - next.cost < goldReserve) return [];
   if (state.seedCount() < state.inventoryCapacity - 5) return [];
   return [{ kind: 'buyStorage', event: 'store:buyItem/request', payload: { itemId: next.itemId }, meta: null }];
+}
+
+// Animal config matching the game's live data.
+const ANIMAL_CONFIG = {
+  cow: { id: 'cow', produceId: 'milk', producePerCycle: 10, productionIntervalMs: 10800000, feedCropId: 'wheat', feedAmount: 25 },
+};
+
+// Feed hungry animals + collect ready produce. Barn state comes from playerFarmState.barns.
+export function planAnimalActions(state) {
+  const plan = [];
+  const now = Date.now();
+  for (const [barnId, barn] of Object.entries(state.barns || {})) {
+    const slots = barn.slots || [];
+    const feed = barn.feed || {};
+    for (let i = 0; i < slots.length; i++) {
+      const animalId = slots[i];
+      if (!animalId) continue;
+      const cfg = ANIMAL_CONFIG[animalId];
+      if (!cfg) continue;
+      const lastFed = feed[String(i)];
+      if (lastFed == null) {
+        // Hungry — feed if we have enough crop in inventory
+        if ((state.cropInventory[cfg.feedCropId] || 0) >= cfg.feedAmount)
+          plan.push({ kind: 'barnFeed', event: 'barn:feed/request', payload: { barnId, slotIndex: i }, meta: null });
+      } else if (now >= lastFed + cfg.productionIntervalMs) {
+        // Production cycle done — collect
+        plan.push({ kind: 'barnCollect', event: 'barn:collect/request', payload: { barnId, slotIndex: i }, meta: null });
+      }
+    }
+  }
+  return plan;
 }
 
 export function planClaims(state) {

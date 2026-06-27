@@ -84,6 +84,8 @@ export class GameSocket extends EventEmitter {
       walletSessionToken: this.walletSessionToken, // required since the 2026-06 update
     });
     this.socket.emit('farm:snapshot:request');
+    // Animal sync handshake (required since animal system launch)
+    this.socket.emit('animal:sync/push', { roomId: config.roomId, animals: [] });
   }
 
   refreshSnapshot() {

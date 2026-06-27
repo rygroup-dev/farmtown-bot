@@ -148,7 +148,7 @@ test('planStorage picks next tier above current capacity', () => {
 test('planActions buys an adjacent plot when farm is full and gold is high', async () => {
   const { GameState } = await import('../src/game/state.js');
   const s = new GameState();
-  s.gold = 5000;
+  s.gold = 8000;
   // single owned tile that is planted+growing (not ready) → farm "full"
   s.tiles.set('5,5', { x:5,y:5, ownerState:'owned', groundState:'planted', blocker:'none', cropId:'carrot', readyAt: Date.now()+99999 });
   s.tiles.set('6,5', { x:6,y:5, ownerState:'locked' }); // adjacent
