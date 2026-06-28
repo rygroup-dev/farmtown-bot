@@ -164,7 +164,9 @@ export async function dispatchCommand(text, ctx, send) {
           animalSection = `\n\n🐄 <b>Animals</b>\n${barnLines.join('\n')}` +
             (resourceLines ? `\n  🥛 Produce: ${resourceLines}` : '');
         } else {
-          animalSection = '\n\n🐄 <b>Animals</b>: no barn yet';
+          const SMALL_BARN_COST = 4_000_000;
+          const pct = Math.min(100, Math.round(s.gold / SMALL_BARN_COST * 100));
+          animalSection = `\n\n🐄 <b>Animals</b>: no barn yet\n  💰 Saving: ${fmt(s.gold)} / ${fmt(SMALL_BARN_COST)} gold ${bar(s.gold, SMALL_BARN_COST)}`;
         }
         return send(`🌾 <b>Farm</b>\n🏡 Owned: ${owned}\n🟩 Grass: ${grass}\n🟫 Tilled: ${tilled}\n🌱 Growing: ${planted}\n✅ Ready: ${ready}\n💀 Dead: ${dead}\n🚫 Blocked: ${blocked}${animalSection}`);
       }
@@ -473,6 +475,10 @@ export async function dispatchCommand(text, ctx, send) {
               (collecting ? ` • ✅ ${collecting} ready` : '') +
               (producing ? ` • ⏳ ${producing} producing` : '') +
               (milk ? ` • 🥛 ${fmt(milk)} milk` : '');
+          } else if (st?.level >= 30) {
+            const BARN_COST = 4_000_000;
+            const g = st?.gold || 0;
+            animalLine = `\n  🐄 No barn — saving ${fmt(g)}/${fmt(BARN_COST)}g (${Math.min(100, Math.round(g / BARN_COST * 100))}%)`;
           }
           totOwned += owned; totStars += (st?.stars ?? 0); totFarm += farmBal; totGold += (st?.gold ?? 0);
           totPower += poolPow; totPayout += poolPay;

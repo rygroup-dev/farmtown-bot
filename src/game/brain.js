@@ -111,6 +111,31 @@ const ANIMAL_CONFIG = {
   cow: { id: 'cow', produceId: 'milk', producePerCycle: 10, productionIntervalMs: 10800000, feedCropId: 'wheat', feedAmount: 25 },
 };
 
+// Barn purchase tiers — event names follow observed store:buyItem pattern.
+export const BARN_TIERS = [
+  { itemId: 'small_barn', cost: 4_000_000, unlockLevel: 30, maxPerFarm: 2, slots: 4 },
+];
+const ANIMAL_PURCHASE = { cow: { cost: 1_000_000 } };
+
+// Buy barns + populate with cows when gold permits. One purchase per tick.
+export function planBarnInvestment(state, { goldReserve = 5000 } = {}) {
+  const barns = state.barns || {};
+  const barnCount = Object.keys(barns).length;
+  for (const tier of BARN_TIERS) {
+    if (barnCount < tier.maxPerFarm && state.level >= tier.unlockLevel) {
+      if (state.gold - tier.cost >= goldReserve)
+        return [{ kind: 'buyBarn', event: 'store:buyItem/request', payload: { itemId: tier.itemId }, meta: null }];
+    }
+  }
+  for (const [barnId, barn] of Object.entries(barns)) {
+    const slots = barn.slots || [];
+    const occupied = slots.filter(s => s != null).length;
+    if (occupied < BARN_TIERS[0].slots && state.gold - ANIMAL_PURCHASE.cow.cost >= goldReserve)
+      return [{ kind: 'buyCow', event: 'barn:addAnimal/request', payload: { barnId, animalId: 'cow' }, meta: null }];
+  }
+  return [];
+}
+
 // Feed hungry animals + collect ready produce. Barn state comes from playerFarmState.barns.
 export function planAnimalActions(state) {
   const plan = [];

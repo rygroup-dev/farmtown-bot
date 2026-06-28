@@ -10,7 +10,7 @@ import { subSessionStore, hasSubSession } from '../sub_sessions.js';
 import { GameSocket } from '../net/socket.js';
 import { GameState } from '../game/state.js';
 import { ActionRunner } from '../game/actions.js';
-import { planActions, planClaims, planStorage, planAnimalActions } from '../game/brain.js';
+import { planActions, planClaims, planStorage, planAnimalActions, planBarnInvestment } from '../game/brain.js';
 import { loadEconomy } from '../game/economy.js';
 import { maybeContribute, pollFarmerPool, poolTiming, decideCropSacrifice, SACRIFICE_CROPS } from '../game/farmerpool.js';
 import { getWalletInfo, withdrawFarm, buyStars, sendFarmTo, sendSolTo, getPendingStars, retryPendingStar } from '../game/wallet_info.js';
@@ -111,7 +111,7 @@ export async function runAccount(account = {}) {
   const rest = new Rest();
   const eco = account.eco || loadEconomy();
   const state = new GameState();
-  const flags = { running: true, paused: false, autopilot: true, connected: false, forceCrop: null, objective: 'balanced' };
+  const flags = { running: true, paused: false, autopilot: true, connected: false, forceCrop: null, objective: 'balanced', poolIsOpen: false };
   const settings = { activeHours: config.activeHours, goldReserve: 2000, poolBurnGold: config.pool.burnGold };
   const stats = { started: Date.now(), harvests: 0, plants: 0, goldStart: 0 };
   const manualQueue = [];
@@ -601,6 +601,8 @@ export async function runAccount(account = {}) {
         if (status?.player?.meetsStarGate) starGateWarned = false;
 
         const timing = poolTiming(status);
+        // Track live pool open state — farming loop uses this to set sacrificeRatio
+        flags.poolIsOpen = timing?.isOpen ?? false;
         if (timing) {
           if (!timing.isOpen && timing.msUntilOpen != null && timing.msUntilOpen > 0) {
             if (!poolOpenNotified) {
@@ -618,7 +620,7 @@ export async function runAccount(account = {}) {
             tg.notify(`${tag}🐦 Pool EARLY BIRD active! +10% power bonus for ${mins} more minutes. Auto-contributing now.`);
           }
         }
-      } catch {}
+      } catch { flags.poolIsOpen = false; }
 
       const r = await maybeContribute(rest, { tag, burnGold: settings.poolBurnGold, goldReserve: config.pool.goldReserve, burnLevels: config.pool.burnLevels, levelFloor: config.pool.levelFloor, sacrificeAt: config.pool.sacrificeAt, currentLevel: state.level, cropInventory: state.cropInventory });
       if (r?.contributed) {
@@ -642,6 +644,7 @@ export async function runAccount(account = {}) {
       } else if (r?.pool && r.pool !== 'active') {
         poolNotified = false; poolOpenNotified = false; earlyBirdNotified = false;
       } else if (!r?.ok && r?.reason === 'status-unavailable') {
+        flags.poolIsOpen = false;
         log.warn('FARMPOOL', `${tag}pool status unreachable — server may still be degraded, retrying in 2-5min`);
       }
 
@@ -682,11 +685,15 @@ export async function runAccount(account = {}) {
         const poolMinLevel = config.pool?.sacrificeAt || 30;
         const autoXp = config.pool.enabled && state.level < poolMinLevel && !flags.forceCrop;
         const effectiveObjective = autoXp ? 'xp' : flags.objective;
+        // sacrificeRatio: 0.5 only when pool is confirmed OPEN via live poll — not just config flag.
+        // When pool is closed/unreachable, plant max-profit crops to build gold faster.
+        const sacrificeRatio = (config.pool.enabled && flags.poolIsOpen) ? 0.5 : 0;
         const plan = [
           ...planClaims(state),
           ...planAnimalActions(state),
-          ...planActions(state, ecoForPlant, { objective: effectiveObjective, timeBudgetSeconds, goldReserve: settings.goldReserve, sacrificeRatio: config.pool.enabled ? 0.5 : 0 }),
+          ...planActions(state, ecoForPlant, { objective: effectiveObjective, timeBudgetSeconds, goldReserve: settings.goldReserve, sacrificeRatio }),
           ...planStorage(state),
+          ...planBarnInvestment(state, { goldReserve: settings.goldReserve }),
         ];
         if (plan.length) {
           for (const a of plan) {
